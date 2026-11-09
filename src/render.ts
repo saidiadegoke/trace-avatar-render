@@ -27,6 +27,10 @@ import { actionsOf, cueAt, pageAt, stepCues } from './plan';
 import { durationOf, editList, frameTimes, outputAt, pickFrames, DEFAULT_MAX_WAIT_MS } from './timeline';
 import type { Segment, TimelineEvent } from './timeline';
 import { chapterCues, toVtt } from './vtt';
+import { describe as describeGuide } from 'trace-avatar/assist';
+import { runQa } from './ai';
+import type { Ai, QaFlag, QaFrame } from './ai';
+import { resize } from './image';
 import type { Cue } from './vtt';
 
 export type OutFormat = 'gif' | 'mp4';
@@ -82,11 +86,21 @@ export interface RenderOptions {
   titleCard?: boolean | string | CardOptions;
   /** A 2 s card after it: true ("Done"), a title, or { title, sub }. */
   endCard?: boolean | string | CardOptions;
+  /** The AI for qa and alt (see trace-avatar/assist). Without it nothing calls a model. */
+  ai?: Ai;
+  /** Send a frame per step (640 px) to the AI to look for errors, empty states, a stall, personal data. */
+  qa?: boolean;
+  /** Write <out>.alt.txt (alt text for the GIF) and, with VTT captions, AI chapter names. */
+  alt?: boolean;
 }
 
 /** What finish() takes besides the capture: the composing options, with the cards resolved. */
 export type FinishOptions = Pick<RenderOptions, 'cuts' | 'timeline' | 'frame' | 'background' | 'camera' | 'captions' | 'poster'> & {
   cards?: { title?: CardOptions; end?: CardOptions };
+  /** Check frames with this AI (the steps give it context). */
+  qa?: { ai: Ai; title?: string; steps: Array<{ n: number; type: string; say?: string }> };
+  /** Chapter names by step index (from the AI), instead of each caption's first sentence. */
+  chapterNames?: Array<{ index: number; name: string }>;
 };
 
 export interface RenderOutput { file: string; format: OutFormat; width: number; height: number; fps: number; frames: number; bytes: number; durationMs: number }
@@ -107,6 +121,10 @@ export interface RenderResult {
   poster?: string;
   vtt?: string;
   chapters?: string;
+  /** <out>.alt.txt, with alt. */
+  alt?: string;
+  /** What the AI flagged in the frames, with qa (times in the video). */
+  qa?: QaFlag[];
 }
 
 export const formatOf = (file: string): OutFormat => {
@@ -144,6 +162,7 @@ export async function render(o: RenderOptions): Promise<RenderResult> {
   const t = trace as { meta?: { title?: string; viewport?: { w: number; h: number } }; avatar?: { name?: string; color?: string } };
   const viewport = o.viewport ?? t.meta?.viewport ?? { w: 1280, h: 800 };
   const burn = o.captions === 'burn' || o.captions === 'both';
+  if ((o.qa || o.alt) && !o.ai) throw new RenderError('qa and alt need an AI: pass ai (--ai)');
 
   const cap = await capture({
     trace, url: o.url, mode, viewport, scale: o.scale, storageState: o.storageState,
@@ -154,7 +173,22 @@ export async function render(o: RenderOptions): Promise<RenderResult> {
   const sub = t.avatar?.name ? { sub: t.avatar.name, color: t.avatar.color } : {};
   const title = cardOf(o.titleCard, { title: t.meta?.title || 'How to', ...sub });
   const end = cardOf(o.endCard, { title: 'Done', ...sub });
-  return finish(cap, outs, { ...o, cards: { ...(title ? { title } : {}), ...(end ? { end } : {}) } });
+  const steps = ((trace as { steps?: Array<{ type: string; say?: string }> }).steps ?? []).map((st, i) => ({ n: i + 1, type: st.type, ...(st.say ? { say: st.say } : {}) }));
+  // Alt text and chapter names come from the trace alone (asked only after the capture worked).
+  const described = o.alt ? await describeGuide(trace as Parameters<typeof describeGuide>[0], { ai: o.ai! }) : null;
+  const { qa: _qa, ...rest } = o;
+  const r = await finish(cap, outs, {
+    ...rest,
+    cards: { ...(title ? { title } : {}), ...(end ? { end } : {}) },
+    ...(o.qa ? { qa: { ai: o.ai!, title: t.meta?.title, steps } } : {}),
+    ...(described?.chapters.length ? { chapterNames: described.chapters } : {}),
+  });
+  if (described?.alt) {
+    const file = `${base(outs[0].file)}.alt.txt`;
+    writeFileSync(file, `${described.alt}\n`);
+    r.alt = file;
+  }
+  return r;
 }
 
 const base = (file: string) => file.replace(/\.[^./]+$/, '');
@@ -196,6 +230,7 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
   const browser = needLayers ? await chromium.launch() : null;
   let layers: Layers | null = null;
   const outputs: RenderOutput[] = [];
+  const qaFrames: QaFrame[] = [];
   let poster: string | undefined;
   try {
     layers = browser ? await createLayers(browser) : null;
@@ -270,6 +305,23 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
         mkdirSync(dirname(poster) || '.', { recursive: true });
         writeFileSync(poster, PNG.sync.write(png));
       }
+
+      if (n === 0 && o.qa) {
+        // A frame just after each step acts (at most 16, spread out) and the last one, 640 px wide.
+        const steps = cap.events.filter((e) => e.type === 'step' && e.index !== undefined);
+        const pick = steps.length > 15 ? Array.from({ length: 15 }, (_, j) => steps[Math.floor((j * steps.length) / 15)]) : steps;
+        const at = [...pick.map((e) => ({ t: outputAt(segs, e.t), label: `after step ${e.index! + 1} (${e.stepType})` })).filter((x): x is { t: number; label: string } => x.t !== null),
+          { t: contentMs - 1, label: 'the end' }];
+        for (const x of at) {
+          const k = Math.min(picks.length - 1, Math.max(0, Math.round(((x.t + 300) * fps) / 1000)));
+          last = null;
+          const img = content(k);
+          const small = img.width > 640 ? resize(img, 640, Math.max(2, Math.round((img.height * 640) / img.width))) : img;
+          const png = new PNG({ width: small.width, height: small.height });
+          png.data.set(small.data);
+          qaFrames.push({ at: Math.round(x.t + titleMs), label: x.label, png: new Uint8Array(PNG.sync.write(png)) });
+        }
+      }
     }
   } finally {
     await layers?.close().catch(() => {});
@@ -283,8 +335,9 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
     vtt = `${base(outs[0].file)}.vtt`;
     chapters = `${base(outs[0].file)}.chapters.vtt`;
     writeFileSync(vtt, toVtt(cues.map(shift)));
-    writeFileSync(chapters, toVtt(chapterCues(cues.map((c) => ({ t: c.start, text: c.text })), contentMs).map(shift)));
+    writeFileSync(chapters, toVtt(o.chapterNames?.length ? namedChapters(o.chapterNames, cap.events, segs, contentMs).map(shift) : chapterCues(cues.map((c) => ({ t: c.start, text: c.text })), contentMs).map(shift)));
   }
+  const qa = o.qa ? await runQa(o.qa.ai, qaFrames, { title: o.qa.title, steps: o.qa.steps }) : undefined;
 
   const rel = (t: number) => Math.round(t - start);
   const result: RenderResult = {
@@ -296,12 +349,23 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
     outputs,
     ...(poster ? { poster } : {}),
     ...(vtt ? { vtt, chapters } : {}),
+    ...(qa ? { qa } : {}),
   };
   if (o.timeline) {
     mkdirSync(dirname(o.timeline) || '.', { recursive: true });
     writeFileSync(o.timeline, JSON.stringify(result, null, 2));
   }
   return result;
+}
+
+/** Chapters named by the AI: each starts when its step acts (steps that were cut or never played are skipped). */
+export function namedChapters(names: ReadonlyArray<{ index: number; name: string }>, events: readonly TimelineEvent[], segs: readonly Segment[], endMs: number): Cue[] {
+  const starts = names.flatMap((c) => {
+    const e = events.find((x) => x.type === 'step' && x.index === c.index);
+    const t = e ? outputAt(segs, e.t) : null;
+    return t === null ? [] : [{ t: c.index === names[0].index ? 0 : t, text: c.name }];
+  }).sort((a, b) => a.t - b.t);
+  return starts.map((c, k) => ({ start: c.t, end: starts[k + 1]?.t ?? endMs, text: c.text }));
 }
 
 interface Art { base: Map<string, Image> | null; captions: Map<string, Image>; title?: Image; end?: Image }

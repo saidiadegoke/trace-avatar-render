@@ -5,7 +5,10 @@
  * Exit codes: 0 rendered, 1 the render failed (a stalled guide, an error in the app), 2 wrong usage.
  */
 
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { apply as applySuggestions, suggest } from 'trace-avatar/assist';
+import type { Suggestion } from 'trace-avatar/assist';
+import { providerOf } from './ai';
 import { parseArgs } from 'node:util';
 import { RenderError } from './capture';
 import { render } from './render';
@@ -39,16 +42,28 @@ export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out
   --poster [file]         a PNG at the first click (default <out>.png)
   --title-card [title]    a 1.5 s card first (default: the trace's title)
   --end-card [title]      a 2 s card last (default: "Done")
+
+  AI (nothing calls a model without --ai):
+  --ai <provider>         gateway:<provider>/<model> (AI_GATEWAY_URL, AI_GATEWAY_KEY), openai:<model>
+                          (OPENAI_API_KEY, OPENAI_BASE_URL for any OpenAI-compatible server), or ./provider.js
+  --qa [strict]           send a frame per step to the AI to look for errors, empty states, a stall, personal
+                          data; strict exits 1 when anything is flagged (needs a vision model)
+  --alt                   write <out>.alt.txt; with --captions vtt, AI names the chapters
+
+Suggestions for a person to accept (the renderer never changes a trace):
+  trace-avatar-render suggest <trace.json> --task captions|title|waits --ai <provider> [--tone friendly|terse|formal]
+                          [--hints hints.json] [--out suggestions.json]
+  trace-avatar-render apply <trace.json> <suggestions.json> --accept 1,3|all --out <new.trace.json>
 `;
 
-export interface Parsed { trace: string; options: Parameters<typeof render>[0] }
+export interface Parsed { trace: string; options: Parameters<typeof render>[0]; /** --ai, made into a provider by main(). */ ai?: string; /** --qa strict */ strict?: boolean }
 
 /** Parse the command line. Throws a usage message (exit 2) on mistakes. Exported for tests. */
 export function parse(argv: string[]): Parsed {
   // --poster, --title-card and --end-card take an optional value: take it here when one follows (a
   // following *.json is the trace, not the value).
-  const extra: { poster?: string | true; title?: string | true; end?: string | true } = {};
-  const flags: Record<string, 'poster' | 'title' | 'end'> = { '--poster': 'poster', '--title-card': 'title', '--end-card': 'end' };
+  const extra: { poster?: string | true; title?: string | true; end?: string | true; qa?: string | true } = {};
+  const flags: Record<string, 'poster' | 'title' | 'end' | 'qa'> = { '--poster': 'poster', '--title-card': 'title', '--end-card': 'end', '--qa': 'qa' };
   const rest: string[] = [];
   for (let k = 0; k < argv.length; k += 1) {
     const a = argv[k];
@@ -56,7 +71,7 @@ export function parse(argv: string[]): Parsed {
     const name = eq > 0 ? a.slice(0, eq) : a;
     if (flags[name]) {
       if (eq > 0) extra[flags[name]] = a.slice(eq + 1);
-      else if (argv[k + 1] !== undefined && !argv[k + 1].startsWith('-') && !/\.json$/i.test(argv[k + 1])) { extra[flags[name]] = argv[k + 1]; k += 1; }
+      else if (argv[k + 1] !== undefined && !argv[k + 1].startsWith('-') && !/\.json$/i.test(argv[k + 1]) && (flags[name] !== 'qa' || argv[k + 1] === 'strict')) { extra[flags[name]] = argv[k + 1]; k += 1; }
       else extra[flags[name]] = true;
       continue;
     }
@@ -73,7 +88,7 @@ export function parse(argv: string[]): Parsed {
       'allow-stall': { type: 'boolean' }, player: { type: 'string' }, timeline: { type: 'string' },
       timeout: { type: 'string' }, headed: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
       frame: { type: 'string' }, background: { type: 'string' }, camera: { type: 'boolean' }, zoom: { type: 'string' },
-      captions: { type: 'string' },
+      captions: { type: 'string' }, ai: { type: 'string' }, alt: { type: 'boolean' },
     },
   });
   if (values.help) throw new UsageError('');
@@ -100,6 +115,8 @@ export function parse(argv: string[]): Parsed {
   const captions = values.captions;
   if (captions !== undefined && captions !== 'burn' && captions !== 'vtt' && captions !== 'both') throw new UsageError('--captions is burn, vtt or both');
   const zoom = num('zoom', values.zoom, 1);
+  if (extra.qa !== undefined && extra.qa !== true && extra.qa !== 'strict') throw new UsageError('--qa takes nothing or strict');
+  if ((extra.qa !== undefined || values.alt) && !values.ai) throw new UsageError('--qa and --alt need --ai');
   const width = num('width', values.width, 16);
   const fps = num('fps', values.fps, 1);
   const maxWait = num('max-wait', values['max-wait']);
@@ -129,13 +146,24 @@ export function parse(argv: string[]): Parsed {
       ...(extra.poster !== undefined ? { poster: extra.poster } : {}),
       ...(extra.title !== undefined ? { titleCard: extra.title } : {}),
       ...(extra.end !== undefined ? { endCard: extra.end } : {}),
+      ...(extra.qa !== undefined ? { qa: true } : {}),
+      ...(values.alt ? { alt: true } : {}),
     },
+    ...(values.ai ? { ai: values.ai } : {}),
+    ...(extra.qa === 'strict' ? { strict: true } : {}),
   };
 }
 
 export class UsageError extends Error {}
 
 export async function main(argv: string[], io = { log: console.log, error: console.error }): Promise<number> {
+  if (argv[0] === 'suggest' || argv[0] === 'apply') {
+    try { return await (argv[0] === 'suggest' ? suggestCmd(argv.slice(1), io) : applyCmd(argv.slice(1), io)); } catch (e) {
+      io.error(`trace-avatar-render ${argv[0]}: ${(e as Error).message}`);
+      if (e instanceof UsageError) io.error(USAGE);
+      return e instanceof UsageError ? 2 : 1;
+    }
+  }
   let p: Parsed;
   try { p = parse(argv); } catch (e) {
     const msg = (e as Error).message;
@@ -144,9 +172,16 @@ export async function main(argv: string[], io = { log: console.log, error: conso
     return e instanceof UsageError && !msg ? 0 : 2;
   }
   try {
+    if (p.ai) p.options.ai = await providerOf(p.ai);
     const r = await render(p.options);
     for (const o of r.outputs) io.log(`${o.file}  ${o.width}×${o.height}  ${o.fps} fps  ${(r.durationMs / 1000).toFixed(1)} s  ${(o.bytes / 1024).toFixed(0)} KB`);
     if (r.rawMs > r.durationMs + 50) io.log(`cut ${((r.rawMs - r.durationMs) / 1000).toFixed(1)} s of waiting`);
+    for (const f of [r.poster, r.vtt, r.chapters, r.alt]) if (f) io.log(f);
+    if (r.qa) {
+      if (!r.qa.length) io.log('qa: nothing flagged');
+      for (const f of r.qa) io.log(`qa: ${(f.at / 1000).toFixed(1)} s  ${f.kind}  ${f.note}`);
+      if (p.strict && r.qa.length) { io.error(`trace-avatar-render: qa flagged ${r.qa.length} problem${r.qa.length > 1 ? 's' : ''} (--qa strict)`); return 1; }
+    }
     return 0;
   } catch (e) {
     io.error(`trace-avatar-render: ${(e as Error).message}`);
@@ -158,6 +193,47 @@ export async function main(argv: string[], io = { log: console.log, error: conso
     }
     return 1;
   }
+}
+
+const readJson = (file: string): unknown => {
+  try { return JSON.parse(readFileSync(file, 'utf8')); } catch (e) { throw new Error(`could not read ${file}: ${(e as Error).message}`); }
+};
+
+/** suggest <trace.json> --task … --ai …: suggestions, numbered, as JSON (stdout or --out). */
+async function suggestCmd(argv: string[], io: { log: (m: string) => void }): Promise<number> {
+  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: {
+    task: { type: 'string' }, ai: { type: 'string' }, tone: { type: 'string' }, hints: { type: 'string' }, out: { type: 'string' }, 'send-typed': { type: 'boolean' },
+  } });
+  const [file] = positionals;
+  if (!file) throw new UsageError('suggest needs a trace file');
+  const task = values.task;
+  if (task !== 'captions' && task !== 'title' && task !== 'waits') throw new UsageError('--task is captions, title or waits');
+  if (!values.ai) throw new UsageError('suggest needs --ai');
+  const tone = values.tone;
+  if (tone !== undefined && tone !== 'friendly' && tone !== 'terse' && tone !== 'formal') throw new UsageError('--tone is friendly, terse or formal');
+  const trace = readJson(file) as Parameters<typeof suggest>[1];
+  const hints = values.hints ? (readJson(values.hints) as Parameters<typeof suggest>[2]['hints']) : undefined;
+  const r = await suggest(task, trace, { ai: await providerOf(values.ai), ...(hints ? { hints } : {}), ...(tone ? { tone } : {}), ...(values['send-typed'] ? { sendTyped: true } : {}) });
+  const out = JSON.stringify({ task, suggestions: r.suggestions.map((sg, k) => ({ id: k + 1, ...sg })), dropped: r.dropped }, null, 2);
+  if (values.out) { writeFileSync(values.out, `${out}\n`); io.log(`${r.suggestions.length} suggestion${r.suggestions.length === 1 ? '' : 's'} in ${values.out}`); } else io.log(out);
+  return 0;
+}
+
+/** apply <trace.json> <suggestions.json> --accept 1,3|all --out new.trace.json */
+async function applyCmd(argv: string[], io: { log: (m: string) => void }): Promise<number> {
+  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { accept: { type: 'string' }, out: { type: 'string' } } });
+  const [file, sugFile] = positionals;
+  if (!file || !sugFile) throw new UsageError('apply needs a trace file and a suggestions file');
+  if (!values.accept) throw new UsageError('apply needs --accept 1,3 (or all): a person picks what goes in');
+  if (!values.out) throw new UsageError('apply needs --out for the new trace');
+  const all = (readJson(sugFile) as { suggestions?: Array<Suggestion & { id: number }> }).suggestions ?? [];
+  const ids = values.accept === 'all' ? all.map((x) => x.id) : values.accept.split(',').map((x) => Number(x.trim()));
+  const missing = ids.filter((id) => !all.some((x) => x.id === id));
+  if (missing.length) throw new UsageError(`no suggestion ${missing.join(', ')} in ${sugFile}`);
+  const next = applySuggestions(readJson(file) as Parameters<typeof applySuggestions>[0], all.filter((x) => ids.includes(x.id)));
+  writeFileSync(values.out, `${JSON.stringify(next, null, 2)}\n`);
+  io.log(`applied ${ids.length} of ${all.length} to ${values.out}`);
+  return 0;
 }
 
 const isMain = import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('/trace-avatar-render') || process.argv[1]?.endsWith('/cli.js');

@@ -4,7 +4,7 @@
  */
 import { createServer } from 'node:http';
 import type { Server } from 'node:http';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, extname } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -160,6 +160,35 @@ describe('render (Chromium)', () => {
     expect([poster.width, poster.height]).toEqual([696, 482]);
     // The poster is the click: the avatar's pink is on it.
     expect(near(new Uint8Array(poster.data), 696, 348, 240, 200, [255, 0, 170])).toBeGreaterThan(10);
+  });
+
+  it('AI: qa looks at a frame per step (640 px PNGs), alt text and chapter names; strict qa fails the CLI', async () => {
+    const calls: Array<{ task: string; input: unknown; images?: Array<{ png: Uint8Array; label: string }> }> = [];
+    const ai = async (task: string, input: unknown, _schema: unknown, o: { images?: Array<{ png: Uint8Array; label: string }> }) => {
+      calls.push({ task, input, images: o.images });
+      if (task === 'qa') return { flags: [{ frame: 1, kind: 'empty', note: 'the status says Loading…' }] };
+      return { alt: 'A cursor waits for the app, then clicks Save.', chapters: [{ n: 1, name: 'Wait for the app' }, { n: 2, name: 'Save' }] };
+    };
+    const file = join(out, 'ai.gif');
+    const r = await render({ trace: join(FIX, 'show.trace.json'), url: `${base}/app.html`, out: [{ file, fps: 10 }], captions: 'vtt', ai: ai as never, qa: true, alt: true, titleCard: true });
+    const qa = calls.find((c) => c.task === 'qa')!;
+    expect(qa.images!.map((i) => i.label)).toEqual(['Frame 1: after step 1 (wait)', 'Frame 2: after step 2 (click)', 'Frame 3: the end']);
+    const png = PNG.sync.read(Buffer.from(qa.images![0].png));
+    expect(png.width).toBeLessThanOrEqual(640);
+    expect(r.qa).toEqual([{ at: expect.any(Number), kind: 'empty', note: 'the status says Loading…' }]);
+    expect(r.qa![0].at).toBeGreaterThanOrEqual(r.offsetMs); // times in the video, after the title card
+    expect(readFileSync(r.alt!, 'utf8')).toBe('A cursor waits for the app, then clicks Save.\n');
+    const chapters = readFileSync(r.chapters!, 'utf8');
+    expect(chapters).toContain('Wait for the app');
+    expect(chapters).toMatch(/00:00:01\.500 --> /); // after the title card
+    // Strict qa through the CLI with a provider file: exit 1, the flag printed.
+    const prov = join(out, 'qa-provider.mjs');
+    writeFileSync(prov, "export default async (task) => task === 'qa' ? { flags: [{ frame: 2, kind: 'error', note: 'Error toast' }] } : {};");
+    const logs: string[] = [];
+    const io = { log: (m: string) => logs.push(m), error: (m: string) => logs.push(m) };
+    expect(await main([join(FIX, 'show.trace.json'), '--url', `${base}/app.html`, '--out', join(out, 'qa.gif'), '--ai', prov, '--qa', 'strict'], io)).toBe(1);
+    expect(logs.join('\n')).toMatch(/qa: \d+\.\d s {2}error {2}Error toast/);
+    expect(logs.join('\n')).toContain('(--qa strict)');
   });
 
   it('blurred elements are blurred in the video', async () => {

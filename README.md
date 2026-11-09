@@ -68,6 +68,24 @@ Exit codes: 0 rendered, 1 the render failed, 2 wrong usage.
 **MP4 needs ffmpeg** on the PATH (or `FFMPEG=/path/to/ffmpeg`): `brew install ffmpeg`, `apt install ffmpeg`. GIF
 needs nothing else (it uses [gifenc](https://github.com/mattdesl/gifenc), pure JS).
 
+**AI** (nothing calls a model without `--ai`):
+
+| | |
+|---|---|
+| `--ai <provider>` | `gateway:<provider>/<model>` (`AI_GATEWAY_URL`, `AI_GATEWAY_KEY`), `openai:<model>` (`OPENAI_API_KEY`; `OPENAI_BASE_URL` for any OpenAI-compatible server, e.g. Ollama), or `./provider.js` whose default export is `(task, input, schema, { instructions, images }) => json` |
+| `--qa [strict]` | sends a frame after each step and the last one (640 px) to the AI, which flags error messages, empty states, a stuck "Looking for …", personal data on screen or a wrong page. `strict` exits 1 when anything is flagged. Needs a vision model |
+| `--alt` | writes `<out>.alt.txt`; with `--captions vtt` the AI names the chapters |
+
+The renderer never changes a trace. Suggestions go to a file, and a person picks what goes in:
+
+```sh
+trace-avatar-render suggest invoice.trace.json --task captions --ai openai:gpt-4o-mini --out suggestions.json
+trace-avatar-render apply invoice.trace.json suggestions.json --accept 1,3 --out invoice.trace.json
+```
+
+What is sent and never sent is the same as in the studio ([trace-avatar's AI suggestions](https://github.com/saidiadegoke/trace-avatar#ai-suggestions-optional));
+frames are sent only with `--qa`.
+
 ## From code
 
 ```js
@@ -84,6 +102,7 @@ const r = await render({
 r.durationMs; r.rawMs; r.outputs;           // the video's length, as played, the files written
 r.poster; r.vtt; r.chapters;                // with those options
 r.offsetMs + outputAt(r.segments, t);       // where a moment of the capture lands in the video
+// With an AI: render({ …, ai, qa: true, alt: true }) → r.qa (flags with times), r.alt (the .alt.txt file)
 ```
 
 `render` rejects with a `RenderError` (with `.screenshot`) when the guide stalls, errors, or can't start.
