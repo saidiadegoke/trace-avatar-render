@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "meta": { "title": "Two pages", "viewport": { "w": 640, "h": 400 }, "seed": 3 },
+  "avatar": { "name": "Ren", "color": "#ff00aa" },
+  "steps": [
+    { "type": "click", "page": "/app.html", "target": { "sel": "#go" } },
+    { "type": "wait", "target": { "sel": "#status" }, "until": { "text": "Saved" }, "timeout": 10000 },
+    { "type": "type", "target": { "sel": "#secret" }, "text": "••••••", "mask": true },
+    { "type": "click", "target": { "sel": "#next" } },
+    { "type": "click", "page": "/page2.html", "target": { "sel": "#finish" }, "say": "Done" }
+  ]
+}

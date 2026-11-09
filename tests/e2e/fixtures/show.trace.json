@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "meta": { "title": "Wait, then save", "viewport": { "w": 640, "h": 400 }, "seed": 3 },
+  "avatar": { "name": "Ren", "color": "#ff00aa" },
+  "steps": [
+    { "type": "wait", "target": { "sel": "#status" }, "until": { "text": "Ready" }, "say": "The app loads…", "timeout": 10000 },
+    { "type": "click", "target": { "sel": "#go" }, "say": "Save it" }
+  ]
+}

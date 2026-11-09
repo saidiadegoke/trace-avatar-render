@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "meta": { "viewport": { "w": 640, "h": 400 } },
+  "steps": [{ "type": "click", "target": { "sel": "#missing" }, "timeout": 1500 }]
+}

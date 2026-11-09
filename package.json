@@ -1,0 +1,39 @@
+{
+  "name": "trace-avatar-render",
+  "version": "0.1.0",
+  "description": "Render a trace-avatar guide to a GIF or MP4 by playing it on your real app in headless Chromium.",
+  "type": "module",
+  "bin": { "trace-avatar-render": "./dist/cli.js" },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run tests/unit",
+    "test:e2e": "npm run build && vitest run tests/e2e",
+    "check": "npm run typecheck && npm test && npm run test:e2e"
+  },
+  "keywords": ["trace-avatar", "gif", "video", "render", "walkthrough", "demo", "playwright"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "gifenc": "^1.0.3",
+    "playwright": "^1.65.0",
+    "pngjs": "^7.0.0",
+    "trace-avatar": "^0.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pngjs": "^6.0.5",
+    "omggif": "^1.0.10",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

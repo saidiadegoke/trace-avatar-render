@@ -1,0 +1,11 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Render fixture, page 2</title></head>
+<body style="margin:0;font:16px system-ui;background:#fff;color:#111">
+  <button id="finish" style="position:absolute;left:300px;top:100px;width:140px;height:48px">Finish</button>
+  <div id="done" style="position:absolute;left:300px;top:180px"></div>
+  <script>
+    document.getElementById('finish').addEventListener('click', () => { document.getElementById('done').textContent = 'Finished'; });
+    // Tell the test server what reached the masked field on page 1.
+    fetch('/seen?v=' + encodeURIComponent(sessionStorage.getItem('secret-seen') || ''));
+  </script>
+</body></html>
