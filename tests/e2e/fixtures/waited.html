@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>The app says it differently now</title></head>
+<body style="margin:0;font:16px system-ui;background:#fff;color:#111">
+  <!-- Was "Saved" after Save; now "Changes stored". ?toast: "Invoice stored" for a moment, then nothing. -->
+  <h2 style="position:absolute;left:100px;top:20px;margin:0">Invoices</h2>
+  <button id="save" style="position:absolute;left:100px;top:100px;width:160px;height:48px">Save</button>
+  <p id="msg" style="position:absolute;left:100px;top:170px;margin:0"></p>
+  <p class="secret" style="position:absolute;left:100px;top:300px;margin:0">Account 0123 stored</p>
+  <script>
+    const msg = document.getElementById('msg');
+    document.getElementById('save').addEventListener('click', () => setTimeout(() => {
+      const toast = location.search.includes('toast');
+      msg.textContent = toast ? 'Invoice stored' : 'Changes stored';
+      if (toast) setTimeout(() => { msg.textContent = ''; }, 700);
+    }, 300));
+  </script>
+</body></html>

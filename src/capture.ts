@@ -99,7 +99,11 @@ function bootstrap(cfg: BootConfig) {
         ...(typeof e.step.say === 'string' && e.step.say.trim() ? { say: e.step.say } : {}),
       });
     });
-    c.on('stalled', (e: any) => send({ type: 'stalled', index: e.index, reason: e.reason }));
+    c.on('stalled', (e: any) => {
+      // What showed while a wait waited ({ text, element }), kept in the page for a repair to look at.
+      (window as any).__taSeen = e.seen ?? [];
+      send({ type: 'stalled', index: e.index, reason: e.reason });
+    });
     c.on('page', (e: any) => send({ type: 'page', index: e.index }));
     c.on('blocked', (e: any) => send({ type: 'blocked', message: e.say }));
     c.on('handoff', (e: any) => {

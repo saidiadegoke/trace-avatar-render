@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- `--repair` fixes a wait whose text changed (`until-timeout`): the texts where it looks and those that showed while
+  it waited are scored (code first, `--ai` only when unsure); a fix of `kind: 'until'` goes to `<out>.repair.json`,
+  verified by playing again. With no clear winner, a guess (`by: 'guess'`) is offered and kept only when the replay
+  passes. `--hide` and `--blur` areas are never offered. Needs trace-avatar 0.1.9 or later.
+
 ## 0.1.0 (first release)
 
 - Render a trace-avatar guide to a **GIF** or an **MP4** by playing it on your real app in headless Chromium, in

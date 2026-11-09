@@ -108,8 +108,9 @@ export interface RenderOptions {
   voiceStrict?: boolean;
   /** Also write the narration track here (WAV). */
   voiceOut?: string;
-  /** When a step can't find its element: propose a fix (<out>.repair.json, for `apply`), verified by playing
-   *  the guide again with it. The render still fails: a person accepts the fix. With `ai`, unsure cases are asked. */
+  /** When a step can't find its element, or a wait's text never shows: propose a fix (<out>.repair.json, for
+   *  `apply`), verified by playing the guide again with it. The render still fails: a person accepts the fix.
+   *  With `ai`, unsure cases are asked; a wait with no clear text is offered as a guess (`by: 'guess'`). */
   repair?: boolean;
   /** With repair and ai: send a screenshot of the stalled page too. */
   repairVision?: boolean;

@@ -336,6 +336,64 @@ describe('render (Chromium)', () => {
     expect(r.events.some((e) => e.type === 'stalled')).toBe(false);
   });
 
+  it('repair a wait whose text changed: what showed after the action is offered as a guess, verified by replay; apply + render plays', async () => {
+    const file = join(out, 'waited.gif');
+    const err = await render({ trace: join(FIX, 'waited.trace.json'), url: `${base}/waited.html`, mode: 'perform', allowPerform: true, out: [file], repair: true, blur: ['.secret'] }).catch((e) => e);
+    expect(err).toBeInstanceOf(RenderError);
+    expect(err.message).toContain('step 2 stalled (until-timeout)');
+    expect(err.message).toMatch(/repair: 1 fix \(1 verified, the guide now plays to the end\)/);
+    const repFile = join(out, 'waited.repair.json');
+    const rep = JSON.parse(readFileSync(repFile, 'utf8'));
+    expect(rep.passed).toBe(true);
+    expect(rep.suggestions).toEqual([expect.objectContaining({ id: 1, task: 'repair', kind: 'until', index: 1, before: 'Saved', value: 'Changes stored', by: 'guess', verified: true })]);
+    expect(existsSync(file)).toBe(false);
+    const fixed = join(out, 'waited.fixed.trace.json');
+    const io = { log: () => {}, error: () => {} };
+    expect(await main(['apply', join(FIX, 'waited.trace.json'), repFile, '--accept', 'all', '--out', fixed], io)).toBe(0);
+    expect(JSON.parse(readFileSync(fixed, 'utf8')).steps[1].until).toEqual({ text: 'Changes stored' });
+    const r = await render({ trace: fixed, url: `${base}/waited.html`, mode: 'perform', allowPerform: true, out: [file] });
+    expect(r.events.some((e) => e.type === 'stalled')).toBe(false);
+  });
+
+  it('repair a wait for a message that came and went: the seen text is chosen; with no clear text and no AI, a person picks', async () => {
+    const err = await render({ trace: join(FIX, 'waited.trace.json'), url: `${base}/waited.html?toast`, mode: 'perform', allowPerform: true, out: [join(out, 'toast.gif')], repair: true }).catch((e) => e);
+    expect(err.message).toMatch(/repair: 1 fix \(1 verified/);
+    const rep = JSON.parse(readFileSync(join(out, 'toast.repair.json'), 'utf8'));
+    expect(rep.suggestions[0]).toEqual(expect.objectContaining({ kind: 'until', value: 'Invoice stored', by: 'guess', verified: true }));
+
+    // Shown, not done: nothing happened after Save, and nothing on the page is like the wait, so a person picks.
+    const odd = join(out, 'odd.trace.json');
+    const t = JSON.parse(readFileSync(join(FIX, 'waited.trace.json'), 'utf8'));
+    t.steps[1].until.text = 'Payment received from the bank';
+    writeFileSync(odd, JSON.stringify(t));
+    const e2 = await render({ trace: odd, url: `${base}/waited.html`, out: [join(out, 'odd.gif')], repair: true, blur: ['.secret'] }).catch((e) => e);
+    expect(e2.message).toMatch(/repair: no fix found; unresolved: step 2/);
+    const r2 = JSON.parse(readFileSync(join(out, 'odd.repair.json'), 'utf8'));
+    expect(r2.unresolved[0]).toEqual(expect.objectContaining({ index: 1, reason: 'until-timeout', why: expect.stringContaining('--ai') }));
+    const texts = r2.unresolved[0].top.map((c: { text: string }) => c.text);
+    expect(texts).toContain('Invoices');
+    expect(texts.join(' ')).not.toContain('0123');            // blurred areas are never offered
+  });
+
+  it('repair a wait with an AI: asked only when unsure, its answer is a part of a text on the page', async () => {
+    const calls: Array<{ task: string; input: { texts: Array<{ id: number; text: string }> } }> = [];
+    const ai = async (task: string, input: unknown) => {
+      calls.push({ task, input: input as never });
+      const c = (input as { texts: Array<{ id: number; text: string }> }).texts.find((x) => x.text === 'Changes stored');
+      return { id: c?.id ?? null, text: 'stored', why: 'the app says stored now' };
+    };
+    const odd = join(out, 'odd-ai.trace.json');
+    const t = JSON.parse(readFileSync(join(FIX, 'waited.trace.json'), 'utf8'));
+    t.steps[1].until.text = 'Payment received from the bank';
+    writeFileSync(odd, JSON.stringify(t));
+    const err = await render({ trace: odd, url: `${base}/waited.html`, mode: 'perform', allowPerform: true, out: [join(out, 'odd-ai.gif')], repair: true, blur: ['.secret'], ai: ai as never }).catch((e) => e);
+    expect(calls.map((c) => c.task)).toEqual(['repair-wait']);
+    expect(JSON.stringify(calls[0].input)).not.toContain('0123');
+    expect(err.message).toMatch(/repair: 1 fix \(1 verified, the guide now plays to the end\)/);
+    const rep = JSON.parse(readFileSync(join(out, 'odd-ai.repair.json'), 'utf8'));
+    expect(rep.suggestions[0]).toEqual(expect.objectContaining({ kind: 'until', value: 'stored', by: 'ai', why: 'the app says stored now', verified: true }));
+  });
+
   it('repair through the CLI: exits 1 with where the fixes are; --repair-vision needs --ai', async () => {
     const logs: string[] = [];
     const io = { log: (m: string) => logs.push(m), error: (m: string) => logs.push(m) };

@@ -94,7 +94,14 @@ frames are sent only with `--qa`.
 what the step means, and re-records that element as the step's target. Code scores the candidates first; an AI
 is asked only when unsure (with `--ai`, DeepSeek first; `--repair-vision` adds a screenshot). Each fix is verified by
 playing the guide again, up to 5 stalls in one run. The fixes go to `<out>.repair.json` with
-`verified`, how each was chosen and, for an unresolved step, the best 3 candidates. The render still exits 1:
+`verified`, how each was chosen and, for an unresolved step, the best 3 candidates. The render still exits 1.
+
+A wait whose text never showed (`until-timeout`: it waited for "Saved", the app now says "Changes stored") is
+repaired the same way, with a fix of `kind: 'until'`. The candidates are the short texts where the wait looks, plus
+those that showed while it waited (a message that came and went counts). When no text is a clear winner and no AI
+settles it, the best one that scores well, else what the app showed after the action, is offered as
+`by: 'guess'`; it is kept only when playing the guide again gets past the wait. `--hide` and `--blur` areas are
+never offered:
 
 ```sh
 trace-avatar-render invoice.trace.json --url … --out invoice.gif --repair --ai gateway

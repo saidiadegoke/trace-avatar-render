@@ -53,9 +53,10 @@ export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out
   --qa [strict]           send a frame per step to the AI to look for errors, empty states, a stall, personal
                           data; strict exits 1 when anything is flagged (needs a vision model)
   --alt                   write <out>.alt.txt; with --captions vtt, AI names the chapters
-  --repair                when a step can't find its element, propose a fix in <out>.repair.json (verified by
-                          playing again); still exits 1. With --ai, unsure cases are asked (DeepSeek first)
-  --repair-vision         with --repair and --ai: send a screenshot of the stalled page too
+  --repair                when a step can't find its element, or a wait's text never shows, propose a fix in
+                          <out>.repair.json (verified by playing again); still exits 1. With --ai, unsure
+                          cases are asked (DeepSeek first)
+  --repair-vision         with --repair and --ai: send a screenshot of the stalled page too (elements only)
 
   Narration (MP4 only; nothing speaks without --voice):
   --voice <voice>         gateway (our AI gateway: Gemini speech, AI_GATEWAY_URL/KEY), gateway:gemini/<model>:<voice>,

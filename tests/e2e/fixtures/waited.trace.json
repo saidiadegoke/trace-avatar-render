@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "meta": { "title": "Save an invoice", "viewport": { "w": 640, "h": 400 } },
+  "steps": [
+    { "type": "click", "target": { "sel": "#save", "role": "button", "name": "Save" }, "say": "Save it" },
+    { "type": "wait", "until": { "text": "Saved" }, "timeout": 2000, "say": "Saving" },
+    { "type": "note", "say": "All done" }
+  ]
+}
