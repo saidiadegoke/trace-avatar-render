@@ -46,6 +46,33 @@ describe('providerOf', () => {
     await expect(providerOf(bad)).rejects.toThrow('default function');
     await expect(providerOf('claude')).rejects.toThrow('--ai is');
   });
+
+  it('gateway alone: DeepSeek, then Gemini, then OpenAI; a list; deepseek-flash for frames; --ai-vision overrides', async () => {
+    const calls: Array<{ url: string; model?: string }> = [];
+    let fail = 0;
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, model: JSON.parse(String(init?.body)).model });
+      if (fail > 0) { fail -= 1; return new Response('no', { status: 400 }); }
+      return new Response(JSON.stringify(url.includes(':generateContent')
+        ? { candidates: [{ content: { parts: [{ text: '{"ok":1}' }] } }] }
+        : { choices: [{ message: { content: '{"ok":1}' } }] }));
+    }));
+    const env = { AI_GATEWAY_URL: 'https://gw', AI_GATEWAY_KEY: 'aik' };
+    const img = [{ png: new Uint8Array([1]), label: 'f' }];
+    await (await providerOf('gateway', env))('qa', {}, {}, { instructions: '', images: img });
+    expect(calls.pop()).toEqual({ url: 'https://gw/v1/deepseek/chat/completions', model: 'deepseek-flash' });
+    fail = 1;
+    await (await providerOf('gateway', env))('title', {}, {}, { instructions: '' });
+    expect(calls.splice(0).map((c) => c.url)).toEqual(['https://gw/v1/deepseek/chat/completions', 'https://gw/v1/gemini/models/gemini-2.5-flash:generateContent']);
+    fail = 1;
+    await (await providerOf('gateway:gemini/gemini-2.5-pro,openai', env))('title', {}, {}, { instructions: '' });
+    expect(calls.splice(0)).toEqual([{ url: 'https://gw/v1/gemini/models/gemini-2.5-pro:generateContent', model: undefined }, { url: 'https://gw/v1/openai/chat/completions', model: 'gpt-4o-mini' }]);
+    await (await providerOf('gateway:deepseek', env, { vision: 'deepseek-vl' }))('qa', {}, {}, { instructions: '', images: img });
+    expect(calls.pop()?.model).toBe('deepseek-vl');
+    await (await providerOf('openai:gpt-4.1-nano', { OPENAI_API_KEY: 'sk' }, { vision: 'gpt-4o' }))('qa', {}, {}, { instructions: '', images: img });
+    expect(calls.pop()?.model).toBe('gpt-4o');
+    vi.unstubAllGlobals();
+  });
 });
 
 describe('runQa', () => {
@@ -81,6 +108,8 @@ describe('cli: AI', () => {
     expect(parse(['--qa', 'a.trace.json', '--url', 'u', '--out', 'o.gif', '--ai', 'x.js']).trace).toBe('a.trace.json');
     expect(() => parse([...base, '--qa'])).toThrow('need --ai');
     expect(() => parse([...base, '--alt'])).toThrow('need --ai');
+    expect(() => parse([...base, '--ai-vision', 'm'])).toThrow('need --ai');
+    expect(parse([...base, '--ai', 'gateway', '--ai-vision', 'deepseek-flash', '--qa'])).toMatchObject({ ai: 'gateway', aiVision: 'deepseek-flash' });
     expect(parse(base).options).not.toHaveProperty('qa');
   });
 

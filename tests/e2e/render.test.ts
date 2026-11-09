@@ -225,6 +225,75 @@ describe('render (Chromium)', () => {
     expect(Number(p2.nb_read_frames)).toBe(f.outputs[0].frames);
   });
 
+  it.runIf(!!findFfmpeg())('narration: the voice speaks each line, the video holds where one runs long, the GIF keeps its timing', async () => {
+    // A stand-in voice: a 440 Hz tone, 3 s for the first line (longer than the gap before its step), 0.6 s for the second.
+    const said: string[] = [];
+    const voice = async (text: string) => {
+      said.push(text);
+      const ms = text.startsWith('The app') ? 3000 : 600;
+      return { pcm: Int16Array.from({ length: (ms * 24000) / 1000 }, (_, i) => Math.round(9000 * Math.sin((2 * Math.PI * 440 * i) / 24000))), sampleRate: 24000 };
+    };
+    const mp4 = join(out, 'narrated.mp4');
+    const gif = join(out, 'narrated.gif');
+    const wav = join(out, 'narrated.wav');
+    const r = await render({ trace: join(FIX, 'show.trace.json'), url: `${base}/app.html`, out: [{ file: mp4, fps: 24 }, { file: gif, fps: 10 }], voice, voiceOut: wav, titleCard: true, captions: 'vtt' });
+    expect(said).toEqual(['The app loads…', 'Save it']);
+    const n = r.narration!;
+    expect(n.lines.map((l) => l.text)).toEqual(['The app loads…', 'Save it']);
+    expect(n.holdMs).toBeGreaterThan(0);
+    // The MP4 has sound; it is longer than the GIF by the holds (within a frame of each).
+    const audio = JSON.parse(spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_name,sample_rate', '-of', 'json', mp4], { encoding: 'utf8' }).stdout).streams[0];
+    expect(audio).toMatchObject({ codec_name: 'aac', sample_rate: '48000' });
+    const [m, g] = r.outputs;
+    expect(Math.abs(m.durationMs - g.durationMs - n.holdMs)).toBeLessThanOrEqual(1000 / 24 + 1000 / 10);
+    // Each tone starts where it was planned (within a frame), after the title card.
+    const track = readFileSync(wav);
+    const pcm = new Int16Array(track.buffer.slice(track.byteOffset + 44, track.byteOffset + track.length));
+    for (const l of n.lines) {
+      expect(l.start).toBeGreaterThanOrEqual(r.offsetMs);
+      const from = Math.round(((l.start - 200) * 48000) / 1000);
+      let k = Math.max(0, from);
+      while (k < pcm.length && Math.abs(pcm[k]) < 1500) k += 1;
+      expect(Math.abs((k * 1000) / 48000 - l.start)).toBeLessThan(1000 / 24);
+    }
+    expect(pcm.length / 48).toBeCloseTo(m.durationMs, -2);
+    // Inside a hold the picture doesn't move.
+    let at = r.offsetMs;
+    const hold = r.segments.find((sg) => { if (sg.hold) return true; at += sg.to - sg.from; return false; })!;
+    expect(hold.hold).toBeGreaterThan(300);
+    const grab = (ms: number) => spawnSync('ffmpeg', ['-v', 'error', '-ss', String(ms / 1000), '-i', mp4, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], { maxBuffer: 1 << 24 }).stdout as Buffer;
+    const a = grab(at + 80);
+    const b = grab(at + hold.hold! - 80);
+    let diff = 0;
+    for (let i = 0; i < a.length; i += 1) diff += Math.abs(a[i] - b[i]);
+    expect(a.length).toBe(640 * 400);
+    expect(diff / a.length).toBeLessThan(1);
+    // The captions follow the held timeline: "Save it" ends 600 ms after its step acts in the video.
+    const click = r.events.find((e) => e.type === 'step' && e.index === 1)!;
+    const acts = outputAt(r.segments, click.t)! + r.offsetMs;
+    const cues = readFileSync(r.vtt!, 'utf8').match(/(\d\d):(\d\d):(\d\d)\.(\d{3}) --> (\d\d):(\d\d):(\d\d)\.(\d{3})\nSave it/)!;
+    const end = (+cues[5] * 3600 + +cues[6] * 60 + +cues[7]) * 1000 + +cues[8];
+    expect(Math.abs(end - (acts + 600))).toBeLessThanOrEqual(2);
+    expect(readFileSync(n.text, 'utf8')).toMatch(/^\[0:0\d\] The app loads…\n\[0:\d\d\] Save it\n$/);
+  });
+
+  it.runIf(!!findFfmpeg())('narration through the CLI: a voice file and a script; a line far too long fails --voice-strict', async () => {
+    const voice = join(out, 'tone-voice.mjs');
+    writeFileSync(voice, `export default async (text) => ({ pcm: Int16Array.from({ length: (text.includes('LONG') ? 9000 : 500) * 24 }, (_, i) => Math.round(8000 * Math.sin(i / 4))), sampleRate: 24000 });`);
+    const script = join(out, 'script.json');
+    writeFileSync(script, JSON.stringify({ lines: [{ n: 1, text: '' }, { n: 2, text: 'Now save it' }] }));
+    const logs: string[] = [];
+    const io = { log: (m: string) => logs.push(m), error: (m: string) => logs.push(m) };
+    const file = join(out, 'cli-voice.mp4');
+    expect(await main([join(FIX, 'show.trace.json'), '--url', `${base}/app.html`, '--out', file, '--voice', voice, '--script', script, '--no-voice-cache'], io)).toBe(0);
+    expect(logs.join('\n')).toMatch(/narration: 1 line/);
+    expect(readFileSync(file.replace(/\.mp4$/, '.narration.txt'), 'utf8')).toMatch(/^\[0:\d\d\] Now save it\n$/);
+    writeFileSync(script, JSON.stringify({ lines: [{ n: 2, text: 'A LONG line' }] }));
+    logs.length = 0;
+    expect(await main([join(FIX, 'show.trace.json'), '--url', `${base}/app.html`, '--out', join(out, 'cli-long.mp4'), '--voice', voice, '--script', script, '--no-voice-cache', '--voice-strict'], io)).toBe(1);
+    expect(logs.join('\n')).toContain("step 2's line needs the video to hold");
+  });
+
   it('without ffmpeg, an MP4 fails before anything is captured', async () => {
     const was = process.env.FFMPEG;
     process.env.FFMPEG = '/no/such/ffmpeg';

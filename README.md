@@ -72,19 +72,36 @@ needs nothing else (it uses [gifenc](https://github.com/mattdesl/gifenc), pure J
 
 | | |
 |---|---|
-| `--ai <provider>` | `gateway:<provider>/<model>` (`AI_GATEWAY_URL`, `AI_GATEWAY_KEY`), `openai:<model>` (`OPENAI_API_KEY`; `OPENAI_BASE_URL` for any OpenAI-compatible server, e.g. Ollama), or `./provider.js` whose default export is `(task, input, schema, { instructions, images }) => json` |
+| `--ai <provider>` | `gateway`: our AI gateway (`AI_GATEWAY_URL`, `AI_GATEWAY_KEY`), DeepSeek first (usually the cheapest), then Gemini, then OpenAI; `gateway:<provider>[/<model>][,<provider>…]` for another order; `openai:<model>` (`OPENAI_API_KEY`; `OPENAI_BASE_URL` for any OpenAI-compatible server, e.g. Ollama), or `./provider.js` whose default export is `(task, input, schema, { instructions, images }) => json` |
+| `--ai-vision <model>` | the model for `--qa`'s frames (the gateway's DeepSeek default is `deepseek-flash`) |
 | `--qa [strict]` | sends a frame after each step and the last one (640 px) to the AI, which flags error messages, empty states, a stuck "Looking for …", personal data on screen or a wrong page. `strict` exits 1 when anything is flagged. Needs a vision model |
 | `--alt` | writes `<out>.alt.txt`; with `--captions vtt` the AI names the chapters |
 
 The renderer never changes a trace. Suggestions go to a file, and a person picks what goes in:
 
 ```sh
-trace-avatar-render suggest invoice.trace.json --task captions --ai openai:gpt-4o-mini --out suggestions.json
+trace-avatar-render suggest invoice.trace.json --task captions --ai gateway --out suggestions.json
 trace-avatar-render apply invoice.trace.json suggestions.json --accept 1,3 --out invoice.trace.json
 ```
 
 What is sent and never sent is the same as in the studio ([trace-avatar's AI suggestions](https://github.com/saidiadegoke/trace-avatar#ai-suggestions-optional));
 frames are sent only with `--qa`.
+
+**Narration** (MP4; nothing speaks without `--voice`):
+
+| | |
+|---|---|
+| `--voice <voice>` | `gateway`: our AI gateway's Gemini speech (`AI_GATEWAY_URL`, `AI_GATEWAY_KEY`; `gateway:gemini/<model>:<voice>`, default `gemini-2.5-flash-preview-tts`, Kore). DeepSeek would go first, but it has no speech API. `openai:<model>[:<voice>]`: `/audio/speech` at `OPENAI_BASE_URL` (OpenAI, or a local server such as Kokoro). `say[:<voice>]`: macOS, offline and free. Or `./voice.js`, whose default export is `(text) => ({ pcm: Int16Array, sampleRate })` |
+| `--script <file.json>` | the spoken lines, `{ "lines": [{ "n": 1, "text": "…" }] }`; by default each step's caption is spoken. An empty line silences a step |
+| `--voice-out <file.wav>` | also write the narration track |
+| `--voice-strict` | fail when a line needs the video to hold longer than 8 s (otherwise a warning) |
+| `--no-voice-cache` | spoken lines are kept in `.trace-avatar-cache/voice` by (voice, text), so a re-render pays only for changed lines |
+
+Each line plays while the cursor travels to its step. Where a line is longer than that, the video holds on the frame
+just before the step until the line ends, so the voice never talks over an action. Captions, chapters and the QA
+frames move with the holds. GIFs from the same render keep the original timing. The script goes to
+`<out>.narration.txt`. `suggest --task narration` drafts spoken lines from the steps (nothing typed is sent) for a
+person to edit and pass with `--script`.
 
 ## From code
 
@@ -131,12 +148,14 @@ for a viewer.
 
 ## Not yet
 
-Planned: narration, click sounds, a phone frame, both modes in one file.  In-browser export ("Save as video" without a server) will be a separate entry in trace-avatar.
+Planned: click sounds, other languages, a phone frame, both modes in one file.  In-browser export ("Save as video" without a server) will be a separate entry in trace-avatar.
 
 ## Developing
 
-`npm test` (unit), `npm run test:e2e` (real Chromium against `tests/e2e/fixtures`; the MP4 test runs only where
-ffmpeg is installed). `node scripts/readme-gifs.mjs ../trace-avatar` rebuilds trace-avatar's README GIFs from its
+`npm test` (unit), `npm run test:e2e` (real Chromium against `tests/e2e/fixtures`; the MP4 and narration tests run only
+where ffmpeg is installed, as in CI). `npm run live:ai [-- deepseek openai gemini]` makes real calls through the AI
+gateway (`AI_GATEWAY_URL`, `AI_GATEWAY_KEY`, or a git-ignored `.env.live`): captions, a title, alt text and a visual
+check, per provider. `node scripts/readme-gifs.mjs ../trace-avatar` rebuilds trace-avatar's README GIFs from its
 fresh build. `node scripts/gif-frames.mjs file.gif dir 2 6` dumps frames at those seconds to look at.
 
 MIT

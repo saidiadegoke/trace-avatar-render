@@ -3,3 +3,6 @@ dist
 out
 test-results
 *.log
+.env.live
+.trace-avatar-cache
+.env

@@ -9,6 +9,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { apply as applySuggestions, suggest } from 'trace-avatar/assist';
 import type { Suggestion } from 'trace-avatar/assist';
 import { providerOf } from './ai';
+import { suggestScript } from './narration';
+import { voiceOf } from './voice';
 import { parseArgs } from 'node:util';
 import { RenderError } from './capture';
 import { render } from './render';
@@ -44,19 +46,30 @@ export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out
   --end-card [title]      a 2 s card last (default: "Done")
 
   AI (nothing calls a model without --ai):
-  --ai <provider>         gateway:<provider>/<model> (AI_GATEWAY_URL, AI_GATEWAY_KEY), openai:<model>
-                          (OPENAI_API_KEY, OPENAI_BASE_URL for any OpenAI-compatible server), or ./provider.js
+  --ai <provider>         gateway: our AI gateway (AI_GATEWAY_URL, AI_GATEWAY_KEY), DeepSeek first, then Gemini,
+                          then OpenAI; or gateway:<provider>[/<model>][,<provider>…]; openai:<model> (OPENAI_API_KEY,
+                          OPENAI_BASE_URL for any OpenAI-compatible server); or ./provider.js
+  --ai-vision <model>     the model for --qa's frames (gateway's DeepSeek default: deepseek-flash)
   --qa [strict]           send a frame per step to the AI to look for errors, empty states, a stall, personal
                           data; strict exits 1 when anything is flagged (needs a vision model)
   --alt                   write <out>.alt.txt; with --captions vtt, AI names the chapters
 
+  Narration (MP4 only; nothing speaks without --voice):
+  --voice <voice>         gateway (our AI gateway: Gemini speech, AI_GATEWAY_URL/KEY), gateway:gemini/<model>:<voice>,
+                          openai:<model>[:<voice>] (OPENAI_API_KEY / OPENAI_BASE_URL), say[:<voice>] (macOS, offline),
+                          or ./voice.js. Each step's caption is spoken; the video holds where a line runs long
+  --script <file.json>    the spoken lines instead: { "lines": [{ "n": 1, "text": "…" }] }
+  --voice-out <file.wav>  also write the narration track
+  --voice-strict          fail when a line needs a hold longer than 8 s
+  --no-voice-cache        don't keep spoken lines in .trace-avatar-cache/voice
+
 Suggestions for a person to accept (the renderer never changes a trace):
-  trace-avatar-render suggest <trace.json> --task captions|title|waits --ai <provider> [--tone friendly|terse|formal]
+  trace-avatar-render suggest <trace.json> --task captions|title|waits|narration --ai <provider> [--tone friendly|terse|formal]
                           [--hints hints.json] [--out suggestions.json]
   trace-avatar-render apply <trace.json> <suggestions.json> --accept 1,3|all --out <new.trace.json>
 `;
 
-export interface Parsed { trace: string; options: Parameters<typeof render>[0]; /** --ai, made into a provider by main(). */ ai?: string; /** --qa strict */ strict?: boolean }
+export interface Parsed { trace: string; options: Parameters<typeof render>[0]; /** --ai, made into a provider by main(). */ ai?: string; /** --ai-vision */ aiVision?: string; /** --voice, made into a Voice by main() */ voice?: string; /** --no-voice-cache */ noVoiceCache?: boolean; /** --qa strict */ strict?: boolean }
 
 /** Parse the command line. Throws a usage message (exit 2) on mistakes. Exported for tests. */
 export function parse(argv: string[]): Parsed {
@@ -88,7 +101,8 @@ export function parse(argv: string[]): Parsed {
       'allow-stall': { type: 'boolean' }, player: { type: 'string' }, timeline: { type: 'string' },
       timeout: { type: 'string' }, headed: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
       frame: { type: 'string' }, background: { type: 'string' }, camera: { type: 'boolean' }, zoom: { type: 'string' },
-      captions: { type: 'string' }, ai: { type: 'string' }, alt: { type: 'boolean' },
+      captions: { type: 'string' }, ai: { type: 'string' }, 'ai-vision': { type: 'string' }, alt: { type: 'boolean' },
+      voice: { type: 'string' }, script: { type: 'string' }, 'voice-out': { type: 'string' }, 'voice-strict': { type: 'boolean' }, 'no-voice-cache': { type: 'boolean' },
     },
   });
   if (values.help) throw new UsageError('');
@@ -116,7 +130,9 @@ export function parse(argv: string[]): Parsed {
   if (captions !== undefined && captions !== 'burn' && captions !== 'vtt' && captions !== 'both') throw new UsageError('--captions is burn, vtt or both');
   const zoom = num('zoom', values.zoom, 1);
   if (extra.qa !== undefined && extra.qa !== true && extra.qa !== 'strict') throw new UsageError('--qa takes nothing or strict');
-  if ((extra.qa !== undefined || values.alt) && !values.ai) throw new UsageError('--qa and --alt need --ai');
+  if ((extra.qa !== undefined || values.alt || values['ai-vision']) && !values.ai) throw new UsageError('--qa, --alt and --ai-vision need --ai');
+  if ((values.script || values['voice-out'] || values['voice-strict'] || values['no-voice-cache']) && !values.voice) throw new UsageError('--script, --voice-out, --voice-strict and --no-voice-cache need --voice');
+  if (values.voice && !values.out.some((f) => /\.mp4$/i.test(f))) throw new UsageError('--voice needs an .mp4 output (a GIF has no sound)');
   const width = num('width', values.width, 16);
   const fps = num('fps', values.fps, 1);
   const maxWait = num('max-wait', values['max-wait']);
@@ -148,8 +164,14 @@ export function parse(argv: string[]): Parsed {
       ...(extra.end !== undefined ? { endCard: extra.end } : {}),
       ...(extra.qa !== undefined ? { qa: true } : {}),
       ...(values.alt ? { alt: true } : {}),
+      ...(values.script ? { script: values.script } : {}),
+      ...(values['voice-out'] ? { voiceOut: values['voice-out'] } : {}),
+      ...(values['voice-strict'] ? { voiceStrict: true } : {}),
     },
     ...(values.ai ? { ai: values.ai } : {}),
+    ...(values['ai-vision'] ? { aiVision: values['ai-vision'] } : {}),
+    ...(values.voice ? { voice: values.voice } : {}),
+    ...(values['no-voice-cache'] ? { noVoiceCache: true } : {}),
     ...(extra.qa === 'strict' ? { strict: true } : {}),
   };
 }
@@ -172,11 +194,17 @@ export async function main(argv: string[], io = { log: console.log, error: conso
     return e instanceof UsageError && !msg ? 0 : 2;
   }
   try {
-    if (p.ai) p.options.ai = await providerOf(p.ai);
+    if (p.ai) p.options.ai = await providerOf(p.ai, process.env, p.aiVision ? { vision: p.aiVision } : {});
+    if (p.voice) p.options.voice = await voiceOf(p.voice, process.env, p.noVoiceCache ? { cacheDir: null } : {});
     const r = await render(p.options);
     for (const o of r.outputs) io.log(`${o.file}  ${o.width}×${o.height}  ${o.fps} fps  ${(r.durationMs / 1000).toFixed(1)} s  ${(o.bytes / 1024).toFixed(0)} KB`);
     if (r.rawMs > r.durationMs + 50) io.log(`cut ${((r.rawMs - r.durationMs) / 1000).toFixed(1)} s of waiting`);
     for (const f of [r.poster, r.vtt, r.chapters, r.alt]) if (f) io.log(f);
+    if (r.narration) {
+      io.log(`narration: ${r.narration.lines.length} line${r.narration.lines.length === 1 ? '' : 's'}${r.narration.holdMs ? `, the video holds ${(r.narration.holdMs / 1000).toFixed(1)} s for them` : ''}  ${r.narration.text}`);
+      if (r.narration.wav) io.log(r.narration.wav);
+    }
+    for (const w of r.warnings ?? []) io.error(`warning: ${w}`);
     if (r.qa) {
       if (!r.qa.length) io.log('qa: nothing flagged');
       for (const f of r.qa) io.log(`qa: ${(f.at / 1000).toFixed(1)} s  ${f.kind}  ${f.note}`);
@@ -207,8 +235,15 @@ async function suggestCmd(argv: string[], io: { log: (m: string) => void }): Pro
   const [file] = positionals;
   if (!file) throw new UsageError('suggest needs a trace file');
   const task = values.task;
-  if (task !== 'captions' && task !== 'title' && task !== 'waits') throw new UsageError('--task is captions, title or waits');
+  if (task !== 'captions' && task !== 'title' && task !== 'waits' && task !== 'narration') throw new UsageError('--task is captions, title, waits or narration');
   if (!values.ai) throw new UsageError('suggest needs --ai');
+  if (task === 'narration') {
+    // A script file for --script: a person edits it before rendering.
+    const r = await suggestScript(await providerOf(values.ai), readJson(file) as Parameters<typeof suggestScript>[1]);
+    const out = JSON.stringify({ ...r.script, ...(r.dropped.length ? { dropped: r.dropped } : {}) }, null, 2);
+    if (values.out) { writeFileSync(values.out, `${out}\n`); io.log(`${r.script.lines.length} line${r.script.lines.length === 1 ? '' : 's'} in ${values.out}: edit them, then --script ${values.out}`); } else io.log(out);
+    return 0;
+  }
   const tone = values.tone;
   if (tone !== undefined && tone !== 'friendly' && tone !== 'terse' && tone !== 'formal') throw new UsageError('--tone is friendly, terse or formal');
   const trace = readJson(file) as Parameters<typeof suggest>[1];

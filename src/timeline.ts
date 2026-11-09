@@ -24,8 +24,13 @@ export interface TimelineEvent {
 
 export interface Span { from: number; to: number; phase: Phase }
 
-/** A kept stretch of the capture, in source time. */
-export interface Segment { from: number; to: number }
+/**
+ * A kept stretch of the capture, in source time. A hold (from === to, `hold` ms) shows the frame at `from`
+ * for that long: the video waits, for instance while a narrated line finishes.
+ */
+export interface Segment { from: number; to: number; hold?: number }
+
+const lenOf = (s: Segment) => (s.hold ? s.hold : s.to - s.from);
 
 export interface EditOptions {
   /** Where the output starts and ends (source time). */
@@ -87,15 +92,15 @@ export function editList(events: readonly TimelineEvent[], o: EditOptions): Segm
   return keep;
 }
 
-export const durationOf = (segs: readonly Segment[]): number => segs.reduce((n, s) => n + (s.to - s.from), 0);
+export const durationOf = (segs: readonly Segment[]): number => segs.reduce((n, s) => n + lenOf(s), 0);
 
 /** The source time shown at output time `t` (clamped to the ends). */
 export function sourceAt(segs: readonly Segment[], t: number): number {
   if (!segs.length) return 0;
   let left = Math.max(0, t);
   for (const s of segs) {
-    const len = s.to - s.from;
-    if (left < len) return s.from + left;
+    const len = lenOf(s);
+    if (left < len) return s.hold ? s.from : s.from + left;
     left -= len;
   }
   return segs[segs.length - 1].to;
@@ -105,10 +110,34 @@ export function sourceAt(segs: readonly Segment[], t: number): number {
 export function outputAt(segs: readonly Segment[], src: number): number | null {
   let out = 0;
   for (const s of segs) {
+    if (s.hold) { out += s.hold; continue; }
     if (src >= s.from && src <= s.to) return out + (src - s.from);
     out += s.to - s.from;
   }
   return null;
+}
+
+/**
+ * Insert holds: each `{ at, ms }` (at = output time on `segs`) freezes the frame there for `ms`. Later output
+ * times move by the holds before them.
+ */
+export function withHolds(segs: readonly Segment[], holds: ReadonlyArray<{ at: number; ms: number }>): Segment[] {
+  const marks = holds.filter((h) => h.ms > 0).map((h) => ({ src: sourceAt(segs, h.at), ms: Math.round(h.ms) })).sort((a, b) => a.src - b.src);
+  const out: Segment[] = [];
+  let k = 0;
+  for (const s of segs) {
+    if (s.hold) { out.push({ ...s }); continue; }
+    let from = s.from;
+    while (k < marks.length && marks[k].src <= s.to) {
+      const m = marks[k++];
+      const at = Math.max(from, m.src);
+      if (at > from) out.push({ from, to: at });
+      out.push({ from: at, to: at, hold: m.ms });
+      from = at;
+    }
+    if (s.to > from) out.push({ from, to: s.to });
+  }
+  return out;
 }
 
 /** The source time of every output frame at `fps`. */

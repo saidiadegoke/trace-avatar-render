@@ -7,8 +7,9 @@
  * With none of the E2 options set, a frame is the capture scaled to the output width, as in E1.
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname, extname } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, extname, join } from 'node:path';
 import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
 import { cameraPath } from './camera';
@@ -24,7 +25,12 @@ import { layoutOf } from './layout';
 import type { FrameStyle, Layout } from './layout';
 import { encodeMp4, findFfmpeg } from './mp4';
 import { actionsOf, cueAt, pageAt, stepCues } from './plan';
-import { durationOf, editList, frameTimes, outputAt, pickFrames, DEFAULT_MAX_WAIT_MS } from './timeline';
+import { durationOf, editList, frameTimes, outputAt, pickFrames, withHolds, DEFAULT_MAX_WAIT_MS } from './timeline';
+import { mix, msOf, toWav, trimSilence, TRACK_RATE } from './audio';
+import type { Pcm } from './audio';
+import { linesOf, narrationText, parseScript, planNarration } from './narration';
+import type { PlannedLine, Script } from './narration';
+import type { Voice } from './voice';
 import type { Segment, TimelineEvent } from './timeline';
 import { chapterCues, toVtt } from './vtt';
 import { describe as describeGuide } from 'trace-avatar/assist';
@@ -92,6 +98,14 @@ export interface RenderOptions {
   qa?: boolean;
   /** Write <out>.alt.txt (alt text for the GIF) and, with VTT captions, AI chapter names. */
   alt?: boolean;
+  /** Narrate MP4 outputs with this voice (see voiceOf). GIFs keep their timing and have no sound. */
+  voice?: Voice;
+  /** What each step says: a script ({ lines: [{ n, text }] }) or its path. Default: each step's caption. */
+  script?: string | Script;
+  /** Fail when a line needs a hold longer than 8 s (otherwise a warning). */
+  voiceStrict?: boolean;
+  /** Also write the narration track here (WAV). */
+  voiceOut?: string;
 }
 
 /** What finish() takes besides the capture: the composing options, with the cards resolved. */
@@ -101,6 +115,8 @@ export type FinishOptions = Pick<RenderOptions, 'cuts' | 'timeline' | 'frame' | 
   qa?: { ai: Ai; title?: string; steps: Array<{ n: number; type: string; say?: string }> };
   /** Chapter names by step index (from the AI), instead of each caption's first sentence. */
   chapterNames?: Array<{ index: number; name: string }>;
+  /** Spoken lines by step index, for MP4 outputs. */
+  narration?: { lines: Map<number, { text: string; audio: Pcm }>; strict?: boolean; out?: string };
 };
 
 export interface RenderOutput { file: string; format: OutFormat; width: number; height: number; fps: number; frames: number; bytes: number; durationMs: number }
@@ -125,6 +141,10 @@ export interface RenderResult {
   alt?: string;
   /** What the AI flagged in the frames, with qa (times in the video). */
   qa?: QaFlag[];
+  /** With a voice: the lines as placed (ms in the video), the time added by holds, the script file, the track. */
+  narration?: { lines: PlannedLine[]; holdMs: number; text: string; wav?: string };
+  /** Things worth knowing that didn't stop the render. */
+  warnings?: string[];
 }
 
 export const formatOf = (file: string): OutFormat => {
@@ -163,6 +183,11 @@ export async function render(o: RenderOptions): Promise<RenderResult> {
   const viewport = o.viewport ?? t.meta?.viewport ?? { w: 1280, h: 800 };
   const burn = o.captions === 'burn' || o.captions === 'both';
   if ((o.qa || o.alt) && !o.ai) throw new RenderError('qa and alt need an AI: pass ai (--ai)');
+  if (o.voice && !outs.some((x) => x.format === 'mp4')) throw new RenderError('narration is for video: add an .mp4 output (a GIF has no sound)');
+  const spoken = o.voice
+    ? linesOf((trace as { steps?: Array<{ say?: string }> }).steps ?? [], o.script === undefined ? undefined : parseScript(typeof o.script === 'string' ? JSON.parse(readFileSync(o.script, 'utf8')) : o.script))
+    : null;
+  if (spoken && !spoken.size) throw new RenderError('nothing to say: no step has a caption (say), and no script was given');
 
   const cap = await capture({
     trace, url: o.url, mode, viewport, scale: o.scale, storageState: o.storageState,
@@ -176,12 +201,24 @@ export async function render(o: RenderOptions): Promise<RenderResult> {
   const steps = ((trace as { steps?: Array<{ type: string; say?: string }> }).steps ?? []).map((st, i) => ({ n: i + 1, type: st.type, ...(st.say ? { say: st.say } : {}) }));
   // Alt text and chapter names come from the trace alone (asked only after the capture worked).
   const described = o.alt ? await describeGuide(trace as Parameters<typeof describeGuide>[0], { ai: o.ai! }) : null;
-  const { qa: _qa, ...rest } = o;
+  // The voice speaks only after the capture worked (one line at a time; cached lines cost nothing).
+  let narration: FinishOptions['narration'];
+  if (spoken) {
+    const lines = new Map<number, { text: string; audio: Pcm }>();
+    for (const [i, text] of spoken) {
+      let audio: Pcm;
+      try { audio = trimSilence(await o.voice!(text)); } catch (e) { throw new RenderError(`the voice failed on step ${i + 1} ("${text}"): ${(e as Error).message}`); }
+      if (audio.pcm.length) lines.set(i, { text, audio });
+    }
+    narration = { lines, ...(o.voiceStrict ? { strict: true } : {}), ...(o.voiceOut ? { out: o.voiceOut } : {}) };
+  }
+  const { qa: _qa, voice: _v, script: _s, ...rest } = o;
   const r = await finish(cap, outs, {
     ...rest,
     cards: { ...(title ? { title } : {}), ...(end ? { end } : {}) },
     ...(o.qa ? { qa: { ai: o.ai!, title: t.meta?.title, steps } } : {}),
     ...(described?.chapters.length ? { chapterNames: described.chapters } : {}),
+    ...(narration ? { narration } : {}),
   });
   if (described?.alt) {
     const file = `${base(outs[0].file)}.alt.txt`;
@@ -198,8 +235,33 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
   const frames = cap.frames.slice().sort((a, b) => a.t - b.t);
   const start = Math.max(frames[0].t, cap.playAt - LEAD_MS);
   const end = cap.stopAt;
-  const segs = editList(cap.events, { start, end, maxWaitMs: o.cuts?.maxWaitMs ?? DEFAULT_MAX_WAIT_MS });
+  const cut = editList(cap.events, { start, end, maxWaitMs: o.cuts?.maxWaitMs ?? DEFAULT_MAX_WAIT_MS });
   const stamps = frames.map((f) => f.t);
+  const warnings: string[] = [];
+
+  // Narration: place each line, and hold the video where a line would run over its step.
+  const narr = o.narration?.lines.size ? o.narration : null;
+  let said: ReturnType<typeof planNarration> | null = null;
+  let held = cut;
+  if (narr) {
+    const seen = new Set<number>();
+    const acts = cap.events
+      .filter((e) => e.type === 'step' && e.index !== undefined)
+      .sort((a, b) => a.t - b.t)
+      .flatMap((e) => { const t = outputAt(cut, e.t); if (t === null || seen.has(e.index!)) return []; seen.add(e.index!); return [{ index: e.index!, t }]; });
+    const lines = new Map([...narr.lines].map(([i, l]) => [i, { text: l.text, ms: msOf(l.audio) }]));
+    said = planNarration(acts, lines, durationOf(cut));
+    for (const l of said.long) {
+      const msg = `step ${l.index + 1}'s line needs the video to hold ${(l.ms / 1000).toFixed(1)} s: shorten it (--script)`;
+      if (narr.strict) throw new RenderError(msg);
+      warnings.push(msg);
+    }
+    const missed = [...narr.lines.keys()].filter((i) => !said!.lines.some((l) => l.index === i));
+    if (missed.length) warnings.push(`no narration for step${missed.length > 1 ? 's' : ''} ${missed.map((i) => i + 1).join(', ')}: ${missed.length > 1 ? 'they' : 'it'} never played`);
+    held = withHolds(cut, said.holds);
+  }
+  // The timeline of everything except GIFs (VTT, poster, QA follow the narrated video).
+  const segs = held;
   const contentMs = durationOf(segs);
 
   // One decoded capture frame at a time: output frames ask for them in order.
@@ -219,25 +281,40 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
   const frameStyle = o.frame ?? 'none';
   const background = o.background ?? DEFAULT_BACKGROUND;
   const burn = o.captions === 'burn' || o.captions === 'both';
-  const cam = o.camera ? cameraPath(actionsOf(cap.events, segs, scale), { width: srcW, height: srcH, ...(typeof o.camera === 'object' && o.camera.zoom ? { zoom: o.camera.zoom } : {}) }) : null;
-  const cues = o.captions ? stepCues(cap.events, segs, contentMs) : [];
+  const variant = (sg: Segment[]) => {
+    const ms = durationOf(sg);
+    return {
+      segs: sg, contentMs: ms,
+      cam: o.camera ? cameraPath(actionsOf(cap.events, sg, scale), { width: srcW, height: srcH, ...(typeof o.camera === 'object' && o.camera.zoom ? { zoom: o.camera.zoom } : {}) }) : null,
+      cues: o.captions ? stepCues(cap.events, sg, ms) : [],
+    };
+  };
+  const main = variant(segs);
+  const plain = narr ? variant(cut) : main;
+  const cues = main.cues;
   const page = pageAt(cap.events);
   const titleMs = o.cards?.title ? TITLE_MS : 0;
   const endMs = o.cards?.end ? END_MS : 0;
   const full: Rect = { x: 0, y: 0, w: srcW, h: srcH };
-  const needLayers = frameStyle !== 'none' || (burn && cues.length > 0) || !!o.cards?.title || !!o.cards?.end;
+  const needLayers = frameStyle !== 'none' || (burn && (cues.length > 0 || plain.cues.length > 0)) || !!o.cards?.title || !!o.cards?.end;
 
   const browser = needLayers ? await chromium.launch() : null;
   let layers: Layers | null = null;
   const outputs: RenderOutput[] = [];
   const qaFrames: QaFrame[] = [];
   let poster: string | undefined;
+  let wav: string | undefined;
+  const tmp = narr ? mkdtempSync(join(tmpdir(), 'tar-voice-')) : null;
   try {
     layers = browser ? await createLayers(browser) : null;
     for (const [n, out] of outs.entries()) {
       mkdirSync(dirname(out.file) || '.', { recursive: true });
       const fps = out.fps ?? (out.format === 'gif' ? 12 : 30);
       const layout = layoutOf(srcW, srcH, out.width ?? (out.format === 'gif' ? 800 : undefined), frameStyle);
+      // A GIF has no sound, so it keeps the timing without holds.
+      const v = out.format === 'gif' ? plain : main;
+      const { cam, segs, contentMs } = v;
+      const cues = v.cues;
       const times = frameTimes(segs, fps);
       const picks = pickFrames(stamps, times);
       const art = await artFor(layers, layout, { frameStyle, background, cues: burn ? cues : [], urls: [...new Set(cap.events.map((e) => e.url).filter(Boolean) as string[])], titles: cap.titles ?? {}, cards: o.cards });
@@ -288,7 +365,15 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
         outputs.push({ file: out.file, format: 'gif', width: layout.width, height: layout.height, fps, frames: total, bytes: gif.bytes.length, durationMs: gif.durationMs });
       } else {
         const all = function* () { for (let m = 0; m < total; m += 1) yield frameAt(m).data; };
-        await encodeMp4(all(), { file: out.file, fps, width: layout.width, height: layout.height });
+        let audio: string | undefined;
+        if (narr && said && tmp) {
+          // One track as long as this video, each line at its place (after the title card).
+          const track = mix(said.lines.map((l) => ({ start: l.start + titleMs, audio: narr.lines.get(l.index)!.audio })), (total * 1000) / fps);
+          audio = join(tmp, `${n}.wav`);
+          writeFileSync(audio, toWav(track, TRACK_RATE));
+          if (narr.out && !wav) { mkdirSync(dirname(narr.out) || '.', { recursive: true }); writeFileSync(narr.out, toWav(track, TRACK_RATE)); wav = narr.out; }
+        }
+        await encodeMp4(all(), { file: out.file, fps, width: layout.width, height: layout.height, ...(audio ? { audio } : {}) });
         outputs.push({ file: out.file, format: 'mp4', width: layout.width, height: layout.height, fps, frames: total, bytes: readFileSync(out.file).length, durationMs: Math.round((total * 1000) / fps) });
       }
 
@@ -326,6 +411,7 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
   } finally {
     await layers?.close().catch(() => {});
     await browser?.close();
+    if (tmp) rmSync(tmp, { recursive: true, force: true });
   }
 
   let vtt: string | undefined;
@@ -339,17 +425,26 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
   }
   const qa = o.qa ? await runQa(o.qa.ai, qaFrames, { title: o.qa.title, steps: o.qa.steps }) : undefined;
 
+  let narration: RenderResult['narration'];
+  if (said) {
+    const mp4 = outs.find((x) => x.format === 'mp4')!;
+    const text = `${base(mp4.file)}.narration.txt`;
+    writeFileSync(text, narrationText(said.lines, titleMs));
+    narration = { lines: said.lines.map((l) => ({ ...l, start: l.start + titleMs })), holdMs: said.holds.reduce((a, h) => a + h.ms, 0), text, ...(wav ? { wav } : {}) };
+  }
   const rel = (t: number) => Math.round(t - start);
   const result: RenderResult = {
     durationMs: Math.round(contentMs + titleMs + endMs),
     offsetMs: titleMs,
     rawMs: Math.round(end - start),
-    segments: segs.map((s) => ({ from: rel(s.from), to: rel(s.to) })),
+    segments: segs.map((s) => ({ from: rel(s.from), to: rel(s.to), ...(s.hold ? { hold: s.hold } : {}) })),
     events: cap.events.map((e) => ({ ...e, t: rel(e.t) })),
     outputs,
     ...(poster ? { poster } : {}),
     ...(vtt ? { vtt, chapters } : {}),
     ...(qa ? { qa } : {}),
+    ...(narration ? { narration } : {}),
+    ...(warnings.length ? { warnings } : {}),
   };
   if (o.timeline) {
     mkdirSync(dirname(o.timeline) || '.', { recursive: true });

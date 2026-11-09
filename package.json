@@ -17,6 +17,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run tests/unit",
     "test:e2e": "npm run build && vitest run tests/e2e",
+    "live:ai": "npm run build && node scripts/live-ai.mjs",
     "check": "npm run typecheck && npm test && npm run test:e2e"
   },
   "keywords": ["trace-avatar", "gif", "video", "render", "walkthrough", "demo", "playwright"],

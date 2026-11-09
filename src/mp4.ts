@@ -14,24 +14,29 @@ export function findFfmpeg(env: NodeJS.ProcessEnv = process.env): string | null 
   } catch { return null; }
 }
 
-/** The ffmpeg arguments for raw RGBA frames of width×height piped in (the renderer composes them). Exported for tests. */
-export function mp4Args(file: string, fps: number, size: { width: number; height: number }): string[] {
+/**
+ * The ffmpeg arguments for raw RGBA frames of width×height piped in (the renderer composes them), and an
+ * optional audio track (a WAV as long as the video). Exported for tests.
+ */
+export function mp4Args(file: string, fps: number, size: { width: number; height: number }, audio?: string): string[] {
   return [
     '-y', '-loglevel', 'error',
     '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${size.width}x${size.height}`, '-framerate', String(fps), '-i', '-',
+    ...(audio ? ['-i', audio, '-map', '0:v', '-map', '1:a', '-c:a', 'aac', '-b:a', '128k'] : []),
     '-vf', 'format=yuv420p',
     '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-r', String(fps),
+    ...(audio ? ['-shortest'] : []),
     '-movflags', '+faststart',
     file,
   ];
 }
 
 /** Write RGBA frames (one per output frame, even width and height) to an MP4. */
-export async function encodeMp4(frames: Iterable<Uint8Array>, o: { file: string; fps: number; width: number; height: number; ffmpeg?: string }): Promise<void> {
+export async function encodeMp4(frames: Iterable<Uint8Array>, o: { file: string; fps: number; width: number; height: number; ffmpeg?: string; audio?: string }): Promise<void> {
   const bin = o.ffmpeg ?? findFfmpeg();
   if (!bin) throw new Error('MP4 needs ffmpeg: install it (brew install ffmpeg, apt install ffmpeg) or set FFMPEG to its path. GIF works without it.');
   if (o.width % 2 || o.height % 2) throw new Error(`MP4 needs an even size (got ${o.width}×${o.height})`);
-  const p = spawn(bin, mp4Args(o.file, o.fps, o), { stdio: ['pipe', 'ignore', 'pipe'] });
+  const p = spawn(bin, mp4Args(o.file, o.fps, o, o.audio), { stdio: ['pipe', 'ignore', 'pipe'] });
   let err = '';
   p.stderr.on('data', (d) => { err += String(d); });
   const done = new Promise<void>((resolve, reject) => {

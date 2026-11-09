@@ -12,17 +12,27 @@ import type { Ai } from 'trace-avatar/assist';
 export type { Ai };
 
 /**
- * --ai gateway:<provider>/<model>  (AI_GATEWAY_URL, AI_GATEWAY_KEY)
- * --ai openai:<model>              (OPENAI_BASE_URL, default https://api.openai.com/v1; OPENAI_API_KEY)
- * --ai ./provider.js               (its default export is the Ai function)
+ * --ai gateway                       DeepSeek, falling back to Gemini, then OpenAI (AI_GATEWAY_URL, AI_GATEWAY_KEY)
+ * --ai gateway:<p>[/<model>][,<p>…]  those providers in that order (a model for the first)
+ * --ai openai:<model>                (OPENAI_BASE_URL, default https://api.openai.com/v1; OPENAI_API_KEY)
+ * --ai ./provider.js                 (its default export is the Ai function)
+ * `vision` (--ai-vision) is the model for calls with images; the gateway's DeepSeek default is deepseek-flash.
  */
-export async function providerOf(spec: string, env: NodeJS.ProcessEnv = process.env): Promise<Ai> {
-  const g = /^gateway:([\w.-]+)\/(.+)$/.exec(spec);
-  if (g) return gateway({ provider: g[1], model: g[2], url: env.AI_GATEWAY_URL, key: env.AI_GATEWAY_KEY });
-  const o = /^openai:(.+)$/.exec(spec);
-  if (o) {
+export async function providerOf(spec: string, env: NodeJS.ProcessEnv = process.env, o: { vision?: string } = {}): Promise<Ai> {
+  const vision = o.vision ? { visionModel: o.vision } : {};
+  const g = /^gateway(?::([\w.-]+)(?:\/([^,]+))?((?:,[\w.-]+)*))?$/.exec(spec);
+  if (g) {
+    return gateway({
+      ...(g[1] ? { provider: [g[1], ...(g[3] ?? '').split(',').filter(Boolean)] } : {}),
+      ...(g[2] ? { model: g[2] } : {}),
+      ...vision,
+      url: env.AI_GATEWAY_URL, key: env.AI_GATEWAY_KEY,
+    });
+  }
+  const m = /^openai:(.+)$/.exec(spec);
+  if (m) {
     if (!env.OPENAI_API_KEY && !env.OPENAI_BASE_URL) throw new Error('--ai openai:… needs OPENAI_API_KEY (and OPENAI_BASE_URL for another OpenAI-compatible server)');
-    return openAiCompatible({ baseUrl: env.OPENAI_BASE_URL || 'https://api.openai.com/v1', ...(env.OPENAI_API_KEY ? { key: env.OPENAI_API_KEY } : {}), model: o[1] });
+    return openAiCompatible({ baseUrl: env.OPENAI_BASE_URL || 'https://api.openai.com/v1', ...(env.OPENAI_API_KEY ? { key: env.OPENAI_API_KEY } : {}), model: m[1], ...vision });
   }
   if (/\.(m?js|cjs)$/.test(spec)) {
     const mod = await import(pathToFileURL(resolve(spec)).href);
@@ -30,7 +40,7 @@ export async function providerOf(spec: string, env: NodeJS.ProcessEnv = process.
     if (typeof fn !== 'function') throw new Error(`${spec} must export a default function (task, input, schema, { instructions, images }) → JSON`);
     return fn as Ai;
   }
-  throw new Error(`--ai is gateway:<provider>/<model>, openai:<model>, or a .js file (got "${spec}")`);
+  throw new Error(`--ai is gateway, gateway:<provider>[/<model>][,<provider>…], openai:<model>, or a .js file (got "${spec}")`);
 }
 
 export const QA_KINDS = ['error', 'empty', 'stalled', 'personal-data', 'wrong-page', 'other'] as const;
