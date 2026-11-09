@@ -45,6 +45,24 @@ Because the guide is known before it plays, the render can do what a screen reco
 | `--timeout <ms>` | give up after this long (default 120000) |
 | `--headed` | watch the browser |
 
+**Polish** (all off by default):
+
+| | |
+|---|---|
+| `--frame browser` | the app in a browser window (title bar with the page path and title) on a background |
+| `--background <css>` | a colour or gradient behind the window and on the cards |
+| `--camera` | zoom in on each click and typing step before it happens, pan between close ones, back out between bursts; never on scrolls, at most one zoom change per 1.5 s. Pair with `--scale 2` for crisp zooms |
+| `--zoom <n>` | how far the camera goes in (default 1.6); implies `--camera` |
+| `--captions burn\|vtt\|both` | `burn` draws the steps' words low in the picture (the player's own bubble is then off); `vtt` writes `<out>.vtt` and `<out>.chapters.vtt` beside the first output |
+| `--poster [file]` | a PNG at the first click (default `<out>.png`) |
+| `--title-card [title]` | 1.5 s first: the trace's title and the avatar, or your title; fades into the guide |
+| `--end-card [title]` | 2 s last: "Done", or your text (e.g. a URL) |
+
+```sh
+trace-avatar-render invoice.trace.json --url http://localhost:3000/app --out invoice.mp4 \
+  --scale 2 --frame browser --camera --captions both --poster --title-card --end-card "acme.com/invoices"
+```
+
 Exit codes: 0 rendered, 1 the render failed, 2 wrong usage.
 
 **MP4 needs ffmpeg** on the PATH (or `FFMPEG=/path/to/ffmpeg`): `brew install ffmpeg`, `apt install ffmpeg`. GIF
@@ -61,8 +79,11 @@ const r = await render({
   mode: 'overlay',
   out: ['invoice.gif', { file: 'invoice.mp4', fps: 30 }],
   storageState: './auth.json',
+  frame: 'browser', camera: true, captions: 'both', poster: true, titleCard: true,   // optional polish
 });
-r.durationMs; r.rawMs; r.outputs;           // after cuts, as played, the files written
+r.durationMs; r.rawMs; r.outputs;           // the video's length, as played, the files written
+r.poster; r.vtt; r.chapters;                // with those options
+r.offsetMs + outputAt(r.segments, t);       // where a moment of the capture lands in the video
 ```
 
 `render` rejects with a `RenderError` (with `.screenshot`) when the guide stalls, errors, or can't start.
@@ -76,16 +97,22 @@ trace ──► headless Chromium at meta.viewport, trace-perform.min.js + an ev
           ▼
        edit list: keep everything except the middle of each long wait
           ▼
-       frames at the target fps ──► GIF (one palette, unchanged pixels transparent) · MP4 (ffmpeg, H.264)
+       frames at the target fps
+          ▼
+       compose: background + window (drawn once per page by Chromium), the camera's view of the capture,
+                a burned-in caption, title / end cards with a fade
+          ▼
+       GIF (one palette, unchanged pixels transparent, written frame by frame) · MP4 (ffmpeg, raw RGBA in, H.264)
 ```
+
+The camera is a pure function of the steps' positions and times, so the same trace gives the same camera.
 
 A guide's own pause steps (and Do it for me's hand-offs) are held for 1.2 s, then it plays on: a video can't wait
 for a viewer.
 
 ## Not yet
 
-Planned: a browser frame, auto camera zoom, burned-in captions and VTT files, poster frames, title cards, and
-narration. In-browser export ("Save as video" without a server) will be a separate entry in trace-avatar.
+Planned: narration, click sounds, a phone frame, both modes in one file.  In-browser export ("Save as video" without a server) will be a separate entry in trace-avatar.
 
 ## Developing
 

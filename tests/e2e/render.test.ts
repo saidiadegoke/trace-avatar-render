@@ -10,6 +10,7 @@ import { join, extname } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import omggif from 'omggif';
+import { PNG } from 'pngjs';
 import { RenderError, findFfmpeg, outputAt, render } from '../../src/index';
 import { main } from '../../src/cli';
 
@@ -115,6 +116,71 @@ describe('render (Chromium)', () => {
     expect(existsSync(join(out, 'bad.failure.png'))).toBe(true);
   });
 
+  it('polish: a browser window, the camera, burned-in captions, title and end cards, VTT and a poster', async () => {
+    const file = join(out, 'polish.gif');
+    const r = await render({
+      trace: join(FIX, 'show.trace.json'), url: `${base}/app.html`, out: [{ file, fps: 10 }],
+      frame: 'browser', background: '#204060', camera: true, captions: 'both', poster: true, titleCard: true, endCard: 'All saved',
+    });
+    // A 640-wide capture in a window: the page stays 640 (never upscaled), plus padding and the bar.
+    expect(r.outputs[0]).toMatchObject({ width: 696, height: 482 });
+    expect(r.offsetMs).toBe(1500);
+    const { g, list, total } = frames(file);
+    expect(Math.abs(total - r.durationMs)).toBeLessThanOrEqual(100);
+    const W = g.width;
+    const px = (f: Uint8Array, x: number, y: number) => Array.from(f.subarray((y * W + x) * 4, (y * W + x) * 4 + 3));
+    const close = (a: number[], b: number[]) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) < 40;
+    // The title card: the background at the edges, a white panel in the middle.
+    expect(close(px(list[0].rgba, 5, 5), [0x20, 0x40, 0x60])).toBe(true);
+    expect(close(px(list[0].rgba, 348, 241 - 60), [255, 255, 255]) || close(px(list[0].rgba, 200, 241), [255, 255, 255])).toBe(true);
+    // During the guide: background at the corner, the title bar (light grey), the app inside the window.
+    const mid = frameAt(list, 1500 + 400).rgba;
+    expect(close(px(mid, 3, 3), [0x20, 0x40, 0x60])).toBe(true);
+    expect(close(px(mid, 160, 40), [0xee, 0xf0, 0xf4])).toBe(true); // the bar, left of the path
+    const click = r.events.find((e) => e.type === 'step' && e.stepType === 'click')!;
+    expect(click.rect).toMatchObject({ x: 100, y: 100, w: 160, h: 48 });
+    expect(click.say).toBe('Save it');
+    const at = r.offsetMs + outputAt(r.segments, click.t)!;
+    const f = frameAt(list, at).rgba;
+    // The burned-in caption: a dark box low in the window, centred.
+    const capY = 482 - 28 - 20; // the content's bottom, less 5%
+    let dark = 0;
+    for (let x = 250; x < 450; x += 1) for (let y = capY - 30; y < capY; y += 1) { const [rr, gg, bb] = px(f, x, y); if (rr + gg + bb < 200) dark += 1; }
+    expect(dark).toBeGreaterThan(500);
+    // The end card shows last.
+    expect(close(px(list[list.length - 1].rgba, 5, 5), [0x20, 0x40, 0x60])).toBe(true);
+    // VTT beside the GIF, shifted by the title card.
+    const vtt = readFileSync(r.vtt!, 'utf8');
+    expect(r.vtt).toBe(join(out, 'polish.vtt'));
+    expect(vtt).toMatch(/^WEBVTT\n\n1\n00:00:01\.500 --> /);
+    expect(vtt).toContain('The app loads…');
+    expect(vtt).toContain('Save it');
+    expect(readFileSync(r.chapters!, 'utf8')).toContain('Save it');
+    const poster = PNG.sync.read(readFileSync(r.poster!));
+    expect([poster.width, poster.height]).toEqual([696, 482]);
+    // The poster is the click: the avatar's pink is on it.
+    expect(near(new Uint8Array(poster.data), 696, 348, 240, 200, [255, 0, 170])).toBeGreaterThan(10);
+  });
+
+  it('blurred elements are blurred in the video', async () => {
+    const sharp = join(out, 'sharp.gif');
+    const soft = join(out, 'soft.gif');
+    await render({ trace: join(FIX, 'show.trace.json'), url: `${base}/app.html`, out: [sharp] });
+    await render({ trace: join(FIX, 'show.trace.json'), url: `${base}/app.html`, out: [soft], blur: ['#go'] });
+    /** The largest step between neighbouring pixels across the button's left edge (x 95..105, y 110..140). */
+    const edge = (file: string) => {
+      const f = frames(file).list[0].rgba;
+      let max = 0;
+      for (let y = 110; y < 140; y += 1) for (let x = 95; x < 105; x += 1) {
+        const a = (y * 640 + x) * 4;
+        max = Math.max(max, Math.abs(f[a] - f[a + 4]) + Math.abs(f[a + 1] - f[a + 5]) + Math.abs(f[a + 2] - f[a + 6]));
+      }
+      return max;
+    };
+    expect(edge(sharp)).toBeGreaterThan(60);
+    expect(edge(soft)).toBeLessThan(edge(sharp) / 2);
+  });
+
   it.runIf(!!findFfmpeg())('MP4 through ffmpeg', async () => {
     const file = join(out, 'show.mp4');
     const r = await render({ trace: join(FIX, 'show.trace.json'), url: `${base}/app.html`, out: [{ file, fps: 24 }] });
@@ -122,6 +188,12 @@ describe('render (Chromium)', () => {
     const s = JSON.parse(probe.stdout).streams[0];
     expect(s).toMatchObject({ width: 640, height: 400, pix_fmt: 'yuv420p' });
     expect(Number(s.nb_read_frames)).toBe(r.outputs[0].frames);
+    // With the window and cards, the MP4 is the composed size.
+    const framed = join(out, 'framed.mp4');
+    const f = await render({ trace: join(FIX, 'show.trace.json'), url: `${base}/app.html`, out: [{ file: framed, fps: 24 }], frame: 'browser', titleCard: true });
+    const p2 = JSON.parse(spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=width,height,nb_read_frames', '-of', 'json', framed], { encoding: 'utf8' }).stdout).streams[0];
+    expect(p2).toMatchObject({ width: f.outputs[0].width, height: f.outputs[0].height });
+    expect(Number(p2.nb_read_frames)).toBe(f.outputs[0].frames);
   });
 
   it('without ffmpeg, an MP4 fails before anything is captured', async () => {

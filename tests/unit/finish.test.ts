@@ -48,4 +48,40 @@ describe('finish: from a capture to a GIF', () => {
     expect(all.durationMs).toBe(10_000);
     expect(all.outputs[0]).toMatchObject({ width: 100, height: 60, frames: 50 });
   });
+
+  it('camera: zoomed in at a click (the dot fills more of the frame), whole frame before; VTT files and a poster', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tar-'));
+    const cap = capture();
+    // The click lands on the dot (x 33..43 at k≈100 → 4 s), with words.
+    cap.events.push({ t: 1_000_000 + 4000, type: 'step', stepType: 'click', rect: { x: 33, y: 20, w: 10, h: 10 }, say: 'Click the dot' });
+    cap.events.push({ t: 1_000_000 + 1000, type: 'step', stepType: 'wait', say: 'Wait for it. Really.' });
+    const r = await finish(cap, [{ file: join(dir, 'c.gif'), format: 'gif', fps: 10 }], { camera: true, captions: 'vtt', poster: true, cuts: { maxWaitMs: 0 } });
+    const g = new omggif.GifReader(new Uint8Array(readFileSync(join(dir, 'c.gif'))));
+    const canvas = new Uint8Array(g.width * g.height * 4);
+    const pink = (at: number) => {
+      let shown = 0;
+      for (let i = 0; i < g.numFrames(); i += 1) {
+        g.decodeAndBlitFrameRGBA(i, canvas);
+        shown += g.frameInfo(i).delay * 10;
+        if (shown > at) break;
+      }
+      let n = 0;
+      for (let p = 0; p < g.width * g.height; p += 1) if (canvas[p * 4] > 200 && canvas[p * 4 + 1] < 80) n += 1;
+      return n;
+    };
+    expect(pink(500)).toBeLessThan(130); // 10×10 dot, whole frame
+    expect(pink(3500)).toBeGreaterThan(160); // ×1.6 → about 16×16 (edges blend)
+    expect(pink(9500)).toBeLessThan(130); // back out
+    // The poster is that zoomed moment.
+    const p = PNG.sync.read(readFileSync(r.poster!));
+    expect(r.poster).toBe(join(dir, 'c.png'));
+    expect([p.width, p.height]).toEqual([100, 60]);
+    let n = 0;
+    for (let i = 0; i < 100 * 60; i += 1) if (p.data[i * 4] > 200 && p.data[i * 4 + 1] < 80) n += 1;
+    expect(n).toBeGreaterThan(160);
+    expect(readFileSync(r.vtt!, 'utf8')).toBe('WEBVTT\n\n1\n00:00:00.000 --> 00:00:01.600\nWait for it. Really.\n\n2\n00:00:01.600 --> 00:00:04.600\nClick the dot\n');
+    expect(r.chapters).toBe(join(dir, 'c.chapters.vtt'));
+    expect(readFileSync(r.chapters!, 'utf8')).toContain('Wait for it.\n');
+    expect(r.offsetMs).toBe(0);
+  });
 });

@@ -16,6 +16,10 @@ export interface TimelineEvent {
   reason?: string;
   message?: string;
   url?: string;
+  /** step: where its element was (viewport CSS px). */
+  rect?: { x: number; y: number; w: number; h: number };
+  /** step: its words. */
+  say?: string;
 }
 
 export interface Span { from: number; to: number; phase: Phase }

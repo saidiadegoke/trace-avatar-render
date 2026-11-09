@@ -27,6 +27,8 @@ export interface CaptureOptions {
   /** Selectors blurred before capture, as well as [data-trace-blur]. */
   blur?: string[];
   rate?: number;
+  /** The player's own captions: 'none' when the renderer burns them in itself. Default: the player's. */
+  captions?: 'bubble' | 'bar' | 'none';
   /** A guide's own pause (or a hand-off) is held this long, then it plays on. Default 1200. */
   pauseHoldMs?: number;
   /** Keep capturing this long after the end. Default 1500. */
@@ -44,6 +46,10 @@ export interface CapturedFrame { t: number; png: Buffer }
 
 export interface Capture {
   frames: CapturedFrame[];
+  /** The viewport in CSS px and the device pixel ratio (frames are viewport × scale). */
+  viewport?: { w: number; h: number; scale: number };
+  /** Each page's title, by path. */
+  titles?: Record<string, string>;
   events: TimelineEvent[];
   /** When the guide started and when capture stopped (wall ms). */
   playAt: number;
@@ -55,13 +61,13 @@ export class RenderError extends Error {
   constructor(message: string, public readonly screenshot?: Buffer) { super(message); this.name = 'RenderError'; }
 }
 
-interface BootConfig { trace: unknown; mode: string; key: string; hide: string[]; blur: string[]; rate?: number; pauseHoldMs: number }
+interface BootConfig { trace: unknown; mode: string; key: string; hide: string[]; blur: string[]; rate?: number; pauseHoldMs: number; captions?: string }
 
 /** Runs in the page (serialised): start the player and report its events. */
 function bootstrap(cfg: BootConfig) {
   if (window.top !== window || location.protocol === 'about:') return;
   const w = window as unknown as Record<string, any>;
-  const send = (e: Record<string, unknown>) => { try { w.__taEvent({ ...e, t: Date.now(), url: location.pathname }); } catch { /* binding gone */ } };
+  const send = (e: Record<string, unknown>) => { try { w.__taEvent({ ...e, t: Date.now(), url: location.pathname, title: document.title }); } catch { /* binding gone */ } };
   let c: any = null;
   let started = false;
   w.__taPlay = () => { started = true; send({ type: 'play' }); c?.play(); };
@@ -72,14 +78,22 @@ function bootstrap(cfg: BootConfig) {
     style.textContent = (cfg.hide.length ? `${cfg.hide.join(',')}{visibility:hidden!important}\n` : '')
       + `${['[data-trace-blur]', ...cfg.blur].join(',')}{filter:blur(8px)!important}`;
     (document.head || document.documentElement).append(style);
-    c = w.__taPlayer.createTrace({ trace: cfg.trace, mode: cfg.mode, autoplay: false, controls: false, resumeKey: cfg.key, ...(cfg.rate ? { rate: cfg.rate } : {}) });
+    c = w.__taPlayer.createTrace({ trace: cfg.trace, mode: cfg.mode, autoplay: false, controls: false, resumeKey: cfg.key, ...(cfg.rate ? { rate: cfg.rate } : {}), ...(cfg.captions ? { captions: cfg.captions } : {}) });
     w.__taRender = c;
     c.on('state', ({ phase }: { phase: string }) => {
       send({ type: 'state', phase });
       // A pause step (or a hand-off) is a beat in a video, then it plays on.
       if (phase === 'paused' && started) setTimeout(() => { if (c.state === 'paused') c.play(); }, cfg.pauseHoldMs);
     });
-    c.on('step', (e: any) => send({ type: 'step', index: e.index, stepType: e.step.type }));
+    c.on('step', (e: any) => {
+      // Where the step happens (CSS px of the viewport), for the camera; its words, for captions.
+      const r = (e.element as Element | null)?.getBoundingClientRect?.();
+      send({
+        type: 'step', index: e.index, stepType: e.step.type,
+        ...(r && r.width + r.height > 0 ? { rect: { x: r.x, y: r.y, w: r.width, h: r.height } } : {}),
+        ...(typeof e.step.say === 'string' && e.step.say.trim() ? { say: e.step.say } : {}),
+      });
+    });
     c.on('stalled', (e: any) => send({ type: 'stalled', index: e.index, reason: e.reason }));
     c.on('page', (e: any) => send({ type: 'page', index: e.index }));
     c.on('blocked', (e: any) => send({ type: 'blocked', message: e.say }));
@@ -110,7 +124,7 @@ export async function capture(o: CaptureOptions): Promise<Capture> {
   const timeout = o.timeoutMs ?? 120_000;
   const cfg: BootConfig = {
     trace: o.trace, mode: o.mode, key: 'trace-avatar-render', hide: o.hide ?? [], blur: o.blur ?? [],
-    ...(o.rate ? { rate: o.rate } : {}), pauseHoldMs: o.pauseHoldMs ?? 1200,
+    ...(o.rate ? { rate: o.rate } : {}), pauseHoldMs: o.pauseHoldMs ?? 1200, ...(o.captions ? { captions: o.captions } : {}),
   };
   // Init scripts run wrapped in a function, so the player's top-level `var TraceAvatar` stays local: keep our
   // own reference (a page may also load another build under the same global name).
@@ -176,7 +190,10 @@ export async function capture(o: CaptureOptions): Promise<Capture> {
     capturing = false;
     await cdp.send('Page.stopScreencast').catch(() => {});
     if (!frames.length) throw new RenderError('no frames were captured');
-    return { frames, events, playAt, stopAt, endAt: done.type === 'end' ? done.t : null };
+    const titles: Record<string, string> = {};
+    for (const e of events as Array<TimelineEvent & { title?: string }>) if (e.url && e.title && !titles[e.url]) titles[e.url] = e.title;
+    for (const e of events as Array<TimelineEvent & { title?: string }>) delete e.title;
+    return { frames, events, playAt, stopAt, endAt: done.type === 'end' ? done.t : null, viewport: { ...o.viewport, scale: o.scale ?? 1 }, titles };
   } finally {
     await browser.close();
   }

@@ -46,26 +46,33 @@ export interface GifResult { bytes: Uint8Array; frames: number; durationMs: numb
 /** Encode frames shown at a steady fps. */
 export function encodeGif(frames: readonly Image[], o: GifOptions): GifResult {
   if (!frames.length) throw new Error('no frames to encode');
-  const { width, height } = frames[0];
+  const w = createGifWriter({ width: frames[0].width, height: frames[0].height, fps: o.fps, repeat: o.repeat, palette: paletteOf(frames, o.paletteSamples) });
+  for (const f of frames) w.add(f);
+  return w.finish();
+}
+
+export interface GifWriter {
+  /** The next frame (same size as the first); it can be reused by the caller once this returns. */
+  add(frame: Image): void;
+  finish(): GifResult;
+}
+
+/**
+ * A GIF written one frame at a time, so a long video never holds all its frames: the palette comes first
+ * (from sample frames, paletteOf), identical frames in a row are merged, later frames hold only changes.
+ */
+export function createGifWriter(o: { width: number; height: number; fps: number; palette: number[][]; repeat?: number }): GifWriter {
+  const { width, height, palette } = o;
   const step = 1000 / o.fps;
-  const palette = paletteOf(frames, o.paletteSamples);
   const full = [...palette, ...Array.from({ length: CLEAR + 1 - palette.length }, () => [0, 0, 0])];
-
-  // Index every frame, merging runs of identical ones.
-  const runs: Array<{ index: Uint8Array; ms: number }> = [];
-  for (const f of frames) {
-    if (f.width !== width || f.height !== height) throw new Error('every frame must be the same size');
-    const index = applyPalette(f.data, palette);
-    const last = runs[runs.length - 1];
-    if (last && same(last.index, index)) last.ms += step;
-    else runs.push({ index, ms: step });
-  }
-
   const gif = GIFEncoder();
   let prev: Uint8Array | null = null;
+  let pending: { index: Uint8Array; ms: number } | null = null;
   let shown = 0;
-  for (let k = 0; k < runs.length; k += 1) {
-    const { index, ms } = runs[k];
+  let count = 0;
+  const flush = () => {
+    if (!pending) return;
+    const { index, ms } = pending;
     // GIF delays are in hundredths: carry the rounding so the total stays right.
     const delay = Math.max(20, Math.round((shown + ms) / 10) * 10 - Math.round(shown / 10) * 10);
     shown += ms;
@@ -77,9 +84,24 @@ export function encodeGif(frames: readonly Image[], o: GifOptions): GifResult {
       gif.writeFrame(diff, width, height, { delay, transparent: true, transparentIndex: CLEAR, dispose: 1 });
     }
     prev = index;
-  }
-  gif.finish();
-  return { bytes: gif.bytes(), frames: runs.length, durationMs: Math.round(shown) };
+    count += 1;
+    pending = null;
+  };
+  return {
+    add(f) {
+      if (f.width !== width || f.height !== height) throw new Error('every frame must be the same size');
+      const index = applyPalette(f.data, palette);
+      if (pending && same(pending.index, index)) { pending.ms += step; return; }
+      flush();
+      pending = { index, ms: step };
+    },
+    finish() {
+      flush();
+      if (!count) throw new Error('no frames to encode');
+      gif.finish();
+      return { bytes: gif.bytes(), frames: count, durationMs: Math.round(shown) };
+    },
+  };
 }
 
 function same(a: Uint8Array, b: Uint8Array): boolean {

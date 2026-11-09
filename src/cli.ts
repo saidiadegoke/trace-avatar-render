@@ -29,14 +29,41 @@ export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out
   --timeline <file>       write the timeline and the cuts as JSON
   --timeout <ms>          give up after this long (default 120000)
   --headed                show the browser
+
+  Polish (all off by default):
+  --frame <none|browser>  a browser window around the app, on a background
+  --background <css>      the background behind the window and on the cards
+  --camera                zoom in on each action and pan between close ones
+  --zoom <n>              how far the camera goes in (default 1.6; implies --camera)
+  --captions <burn|vtt|both>  burn the steps' words in, write <out>.vtt + <out>.chapters.vtt, or both
+  --poster [file]         a PNG at the first click (default <out>.png)
+  --title-card [title]    a 1.5 s card first (default: the trace's title)
+  --end-card [title]      a 2 s card last (default: "Done")
 `;
 
 export interface Parsed { trace: string; options: Parameters<typeof render>[0] }
 
 /** Parse the command line. Throws a usage message (exit 2) on mistakes. Exported for tests. */
 export function parse(argv: string[]): Parsed {
+  // --poster, --title-card and --end-card take an optional value: take it here when one follows (a
+  // following *.json is the trace, not the value).
+  const extra: { poster?: string | true; title?: string | true; end?: string | true } = {};
+  const flags: Record<string, 'poster' | 'title' | 'end'> = { '--poster': 'poster', '--title-card': 'title', '--end-card': 'end' };
+  const rest: string[] = [];
+  for (let k = 0; k < argv.length; k += 1) {
+    const a = argv[k];
+    const eq = a.indexOf('=');
+    const name = eq > 0 ? a.slice(0, eq) : a;
+    if (flags[name]) {
+      if (eq > 0) extra[flags[name]] = a.slice(eq + 1);
+      else if (argv[k + 1] !== undefined && !argv[k + 1].startsWith('-') && !/\.json$/i.test(argv[k + 1])) { extra[flags[name]] = argv[k + 1]; k += 1; }
+      else extra[flags[name]] = true;
+      continue;
+    }
+    rest.push(a);
+  }
   const { values, positionals } = parseArgs({
-    args: argv,
+    args: rest,
     allowPositionals: true,
     options: {
       url: { type: 'string' }, out: { type: 'string', multiple: true }, mode: { type: 'string' },
@@ -45,6 +72,8 @@ export function parse(argv: string[]): Parsed {
       'max-wait': { type: 'string' }, hide: { type: 'string', multiple: true }, blur: { type: 'string', multiple: true },
       'allow-stall': { type: 'boolean' }, player: { type: 'string' }, timeline: { type: 'string' },
       timeout: { type: 'string' }, headed: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+      frame: { type: 'string' }, background: { type: 'string' }, camera: { type: 'boolean' }, zoom: { type: 'string' },
+      captions: { type: 'string' },
     },
   });
   if (values.help) throw new UsageError('');
@@ -67,6 +96,10 @@ export function parse(argv: string[]): Parsed {
     if (!m) throw new UsageError('--viewport is WIDTHxHEIGHT, e.g. 1280x800');
     viewport = { w: Number(m[1]), h: Number(m[2]) };
   }
+  if (values.frame && values.frame !== 'none' && values.frame !== 'browser') throw new UsageError('--frame is none or browser');
+  const captions = values.captions;
+  if (captions !== undefined && captions !== 'burn' && captions !== 'vtt' && captions !== 'both') throw new UsageError('--captions is burn, vtt or both');
+  const zoom = num('zoom', values.zoom, 1);
   const width = num('width', values.width, 16);
   const fps = num('fps', values.fps, 1);
   const maxWait = num('max-wait', values['max-wait']);
@@ -89,6 +122,13 @@ export function parse(argv: string[]): Parsed {
       ...(values.timeline ? { timeline: values.timeline } : {}),
       ...(values.timeout ? { timeoutMs: num('timeout', values.timeout, 1) } : {}),
       headless: !values.headed,
+      ...(values.frame ? { frame: values.frame as 'none' | 'browser' } : {}),
+      ...(values.background ? { background: values.background } : {}),
+      ...(zoom ? { camera: { zoom } } : values.camera ? { camera: true } : {}),
+      ...(captions ? { captions } : {}),
+      ...(extra.poster !== undefined ? { poster: extra.poster } : {}),
+      ...(extra.title !== undefined ? { titleCard: extra.title } : {}),
+      ...(extra.end !== undefined ? { endCard: extra.end } : {}),
     },
   };
 }
