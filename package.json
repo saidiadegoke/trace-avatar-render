@@ -18,6 +18,7 @@
   "files": [
     "dist",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "engines": {
@@ -29,7 +30,8 @@
     "test": "vitest run tests/unit",
     "test:e2e": "npm run build && vitest run tests/e2e",
     "live:ai": "npm run build && node scripts/live-ai.mjs",
-    "check": "npm run typecheck && npm test && npm run test:e2e"
+    "check": "npm run typecheck && npm test && npm run test:e2e",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "keywords": [
     "trace-avatar",
@@ -38,10 +40,22 @@
     "render",
     "walkthrough",
     "demo",
-    "playwright"
+    "playwright",
+    "docs",
+    "ci",
+    "screencast",
+    "narration"
   ],
   "author": "",
   "license": "MIT",
+  "homepage": "https://github.com/saidiadegoke/trace-avatar-render#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/saidiadegoke/trace-avatar-render.git"
+  },
+  "bugs": {
+    "url": "https://github.com/saidiadegoke/trace-avatar-render/issues"
+  },
   "dependencies": {
     "gifenc": "^1.0.3",
     "playwright": "^1.65.0",

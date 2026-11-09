@@ -4,9 +4,12 @@ Turn a [trace-avatar](https://github.com/saidiadegoke/trace-avatar) guide into a
 on your real app in headless Chromium.
 
 ```bash
+npm i -D trace-avatar-render         # or run it with npx
 npx playwright install chromium      # once
 npx trace-avatar-render invoice.trace.json --url http://localhost:3000/app --out invoice.gif
 ```
+
+Node 20 or later. GIFs need nothing else; MP4 needs ffmpeg (below).
 
 ```
 invoice.gif  800×500  12 fps  9.6 s  210 KB
@@ -72,7 +75,7 @@ needs nothing else (it uses [gifenc](https://github.com/mattdesl/gifenc), pure J
 
 | | |
 |---|---|
-| `--ai <provider>` | `gateway`: our AI gateway (`AI_GATEWAY_URL`, `AI_GATEWAY_KEY`), DeepSeek first (usually the cheapest), then Gemini, then OpenAI; `gateway:<provider>[/<model>][,<provider>…]` for another order; `openai:<model>` (`OPENAI_API_KEY`; `OPENAI_BASE_URL` for any OpenAI-compatible server, e.g. Ollama), or `./provider.js` whose default export is `(task, input, schema, { instructions, images }) => json` |
+| `--ai <provider>` | `gateway`: an AI gateway that forwards each provider's own API (`AI_GATEWAY_URL`, `AI_GATEWAY_KEY`), DeepSeek first (usually the cheapest), then Gemini, then OpenAI; `gateway:<provider>[/<model>][,<provider>…]` for another order; `openai:<model>` (`OPENAI_API_KEY`; `OPENAI_BASE_URL` for any OpenAI-compatible server, e.g. Ollama), or `./provider.js` whose default export is `(task, input, schema, { instructions, images }) => json` |
 | `--ai-vision <model>` | the model for `--qa`'s frames (the gateway's DeepSeek default is `deepseek-flash`) |
 | `--qa [strict]` | sends a frame after each step and the last one (640 px) to the AI, which flags error messages, empty states, a stuck "Looking for …", personal data on screen or a wrong page. `strict` exits 1 when anything is flagged. Needs a vision model |
 | `--alt` | writes `<out>.alt.txt`; with `--captions vtt` the AI names the chapters |
@@ -102,7 +105,7 @@ trace-avatar-render apply invoice.trace.json invoice.repair.json --accept 1,2 --
 
 | | |
 |---|---|
-| `--voice <voice>` | `gateway`: our AI gateway's Gemini speech (`AI_GATEWAY_URL`, `AI_GATEWAY_KEY`; `gateway:gemini/<model>:<voice>`, default `gemini-2.5-flash-preview-tts`, Kore). DeepSeek would go first, but it has no speech API. `openai:<model>[:<voice>]`: `/audio/speech` at `OPENAI_BASE_URL` (OpenAI, or a local server such as Kokoro). `say[:<voice>]`: macOS, offline and free. Or `./voice.js`, whose default export is `(text) => ({ pcm: Int16Array, sampleRate })` |
+| `--voice <voice>` | `gateway`: Gemini speech through an AI gateway (`AI_GATEWAY_URL`, `AI_GATEWAY_KEY`; `gateway:gemini/<model>:<voice>`, default `gemini-2.5-flash-preview-tts`, Kore). DeepSeek would go first, but it has no speech API. `openai:<model>[:<voice>]`: `/audio/speech` at `OPENAI_BASE_URL` (OpenAI, or a local server such as Kokoro). `say[:<voice>]`: macOS, offline and free. Or `./voice.js`, whose default export is `(text) => ({ pcm: Int16Array, sampleRate })` |
 | `--script <file.json>` | the spoken lines, `{ "lines": [{ "n": 1, "text": "…" }] }`; by default each step's caption is spoken. An empty line silences a step |
 | `--voice-out <file.wav>` | also write the narration track |
 | `--voice-strict` | fail when a line needs the video to hold longer than 8 s (otherwise a warning) |
@@ -159,7 +162,8 @@ for a viewer.
 
 ## Not yet
 
-Planned: click sounds, other languages, a phone frame, both modes in one file.  In-browser export ("Save as video" without a server) will be a separate entry in trace-avatar.
+Planned: click sounds, other languages, a phone frame, both modes in one file. For a video without a server, trace-avatar's own
+[Save as video](https://github.com/saidiadegoke/trace-avatar#save-as-video-in-the-browser) records the guide in the viewer's browser.
 
 ## Developing
 

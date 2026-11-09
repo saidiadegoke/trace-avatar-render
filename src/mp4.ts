@@ -46,7 +46,14 @@ export async function encodeMp4(frames: Iterable<Uint8Array>, o: { file: string;
   p.stdin.on('error', () => { /* ffmpeg died: `done` reports why */ });
   for (const f of frames) {
     if (p.exitCode !== null) break;
-    if (!p.stdin.write(f)) await new Promise<void>((r) => { p.stdin.once('drain', r); p.once('close', r); });
+    if (!p.stdin.write(f)) {
+      // Wait for room, or for ffmpeg to end; either way take both listeners off (one per frame would pile up).
+      await new Promise<void>((r) => {
+        const go = () => { p.stdin.off('drain', go); p.off('close', go); r(); };
+        p.stdin.once('drain', go);
+        p.once('close', go);
+      });
+    }
   }
   p.stdin.end();
   await done;
