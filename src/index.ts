@@ -33,3 +33,5 @@ export type { Voice } from './voice';
 export { linesOf, parseScript, planNarration, narrationText, suggestScript } from './narration';
 export type { NarrationPlan, PlannedLine, PlanOptions, Script } from './narration';
 export { providerOf, runQa } from './ai';
+export { repairGuide, stallInspector, repairScriptOf } from './repair';
+export type { RepairOutcome, RepairSuggestion, Unresolved } from './repair';

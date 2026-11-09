@@ -8,6 +8,7 @@
 
 import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
+import type { Page } from 'playwright';
 import type { TimelineEvent } from './timeline';
 
 export interface CaptureOptions {
@@ -37,6 +38,8 @@ export interface CaptureOptions {
   leadMs?: number;
   /** Render a stalled guide anyway (it shows "Looking for …") instead of failing. */
   allowStall?: boolean;
+  /** Called on a stall with the live page, before anything else happens; what it returns rides on the RenderError. */
+  onStall?: (page: Page, stall: { index: number; reason: string }) => Promise<unknown>;
   /** Give up after this long. Default 120 000. */
   timeoutMs?: number;
   headless?: boolean;
@@ -58,6 +61,8 @@ export interface Capture {
 }
 
 export class RenderError extends Error {
+  /** A stall: which step, why, and what onStall found on the page. */
+  stall?: { index: number; reason: string; data?: unknown };
   constructor(message: string, public readonly screenshot?: Buffer) { super(message); this.name = 'RenderError'; }
 }
 
@@ -183,7 +188,13 @@ export async function capture(o: CaptureOptions): Promise<Capture> {
     if (done.type === 'error' || done.type === 'blocked') throw new RenderError(`the guide stopped: ${done.message ?? done.type}`, await page.screenshot().catch(() => undefined));
     if (done.type === 'stalled') {
       const why = `step ${(done.index ?? 0) + 1} stalled (${done.reason}) on ${done.url ?? 'the page'}`;
-      if (!o.allowStall) throw new RenderError(`${why}: the app no longer matches the guide. Pass allowStall (--allow-stall) to render it anyway.`, await page.screenshot().catch(() => undefined));
+      const stall = { index: done.index ?? 0, reason: done.reason ?? 'not-found' };
+      const data = o.onStall ? await o.onStall(page, stall) : undefined;
+      if (!o.allowStall) {
+        const err = new RenderError(`${why}: the app no longer matches the guide. Pass allowStall (--allow-stall) to render it anyway.`, await page.screenshot().catch(() => undefined));
+        err.stall = { ...stall, ...(data !== undefined ? { data } : {}) };
+        throw err;
+      }
       await sleep(3000); // show "Looking for …" for a moment
     } else await sleep(o.holdEndMs ?? 1500);
     const stopAt = Date.now();

@@ -10,7 +10,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
-import { describe, gateway, suggest } from 'trace-avatar/assist';
+import { chooseRepair, describe, gateway, suggest } from 'trace-avatar/assist';
 import { runQa } from '../dist/index.js';
 
 for (const file of ['.env.live', '.env'].filter((f) => existsSync(f))) {
@@ -62,6 +62,16 @@ for (const provider of providers) {
     console.log('  captions:', caps.suggestions.map((s) => `${s.index + 1}: ${s.value}`).join(' | '), caps.dropped.length ? `(dropped ${caps.dropped.length})` : '');
     console.log('  title:', title.suggestions[0]?.value ?? '(none)');
     console.log('  alt:', desc.alt);
+    // An unsure repair: "Next" is gone; the page has "Continue" and "Back".
+    const broken = { version: 1, steps: [...trace.steps, { type: 'click', target: { role: 'link', name: 'Next' }, say: 'Go on to the next part' }] };
+    const fix = await chooseRepair(broken, 3, [
+      { id: 0, role: 'link', name: 'Back', near: 'New invoice' },
+      { id: 1, role: 'button', name: 'Save invoice', near: 'New invoice' },
+      { id: 2, role: 'link', name: 'Continue', near: 'New invoice' },
+      { id: 3, role: 'link', name: 'Invoices', near: 'Menu' },
+    ], { ai });
+    console.log('  repair:', fix.by, fix.id === 2 ? 'Continue ✓' : `chose ${fix.id}`, fix.why ?? '');
+    if (fix.id !== 2) throw new Error('the repair chose the wrong element');
     console.log('  qa:', qa.length ? qa.map((f) => `${f.at} ms ${f.kind}: ${f.note}`).join(' | ') : 'nothing flagged');
     if (!caps.suggestions.length) throw new Error('no captions');
   } catch (e) {

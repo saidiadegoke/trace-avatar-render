@@ -294,6 +294,56 @@ describe('render (Chromium)', () => {
     expect(logs.join('\n')).toContain("step 2's line needs the video to hold");
   });
 
+  it('repair: a renamed button is fixed by score (no AI) and verified; an unsure link is left to a person', async () => {
+    const file = join(out, 'changed.gif');
+    const err = await render({ trace: join(FIX, 'changed.trace.json'), url: `${base}/changed.html`, out: [file], repair: true, hide: ['.dev'] }).catch((e) => e);
+    expect(err).toBeInstanceOf(RenderError);
+    expect(err.message).toContain('step 1 stalled (not-found)');
+    expect(err.message).toMatch(/repair: 1 fix \(1 verified\); unresolved: step 2/);
+    const rep = JSON.parse(readFileSync(join(out, 'changed.repair.json'), 'utf8'));
+    expect(rep.passed).toBe(false);
+    expect(rep.suggestions).toEqual([expect.objectContaining({ id: 1, task: 'repair', kind: 'target', index: 0, by: 'score', verified: true, before: 'button “Save the invoice”', value: 'button “Save invoice”', target: expect.objectContaining({ sel: '#store', role: 'button', name: 'Save invoice' }) })]);
+    expect(rep.unresolved).toEqual([expect.objectContaining({ index: 1, reason: 'not-found' })]);
+    const top = rep.unresolved[0].top.map((c: { name: string }) => c.name);
+    expect(top).toContain('Continue');
+    expect(top).not.toContain('Save (dev)');                // hidden areas are never offered
+    expect(existsSync(file)).toBe(false);                    // nothing rendered: a person decides
+  });
+
+  it('repair with an AI for the unsure step: both fixed and verified; apply + render then plays to the end', async () => {
+    const calls: Array<{ task: string; input: { candidates: Array<{ id: number; name: string }> } }> = [];
+    const ai = async (task: string, input: unknown) => {
+      calls.push({ task, input: input as never });
+      const c = (input as { candidates: Array<{ id: number; name: string }> }).candidates.find((x) => x.name === 'Continue');
+      return { id: c?.id ?? null, why: '"Next" became "Continue"' };
+    };
+    const file = join(out, 'changed-ai.gif');
+    const err = await render({ trace: join(FIX, 'changed.trace.json'), url: `${base}/changed.html`, out: [file], repair: true, ai: ai as never }).catch((e) => e);
+    expect(err.message).toMatch(/repair: 2 fixes \(2 verified, the guide now plays to the end\)/);
+    expect(calls.map((c) => c.task)).toEqual(['repair']);   // the button was settled by score
+    expect(JSON.stringify(calls[0].input)).not.toContain('"key"');
+    const repFile = join(out, 'changed-ai.repair.json');
+    const rep = JSON.parse(readFileSync(repFile, 'utf8'));
+    expect(rep.passed).toBe(true);
+    expect(rep.suggestions.map((x: { by: string; verified: boolean; why?: string }) => [x.by, x.verified])).toEqual([['score', true], ['ai', true]]);
+    expect(rep.suggestions[1].why).toBe('"Next" became "Continue"');
+    // A person accepts both; the repaired guide renders.
+    const fixed = join(out, 'changed.fixed.trace.json');
+    const logs: string[] = [];
+    expect(await main(['apply', join(FIX, 'changed.trace.json'), repFile, '--accept', '1,2', '--out', fixed], { log: (m) => logs.push(m), error: (m) => logs.push(m) })).toBe(0);
+    const r = await render({ trace: fixed, url: `${base}/changed.html`, out: [file] });
+    expect(r.events.filter((e) => e.type === 'step').map((e) => e.index)).toEqual([0, 1]);
+    expect(r.events.some((e) => e.type === 'stalled')).toBe(false);
+  });
+
+  it('repair through the CLI: exits 1 with where the fixes are; --repair-vision needs --ai', async () => {
+    const logs: string[] = [];
+    const io = { log: (m: string) => logs.push(m), error: (m: string) => logs.push(m) };
+    expect(await main([join(FIX, 'changed.trace.json'), '--url', `${base}/changed.html`, '--out', join(out, 'cli-changed.gif'), '--repair'], io)).toBe(1);
+    expect(logs.join('\n')).toContain('cli-changed.repair.json, then: trace-avatar-render apply');
+    expect(await main([join(FIX, 'changed.trace.json'), '--url', 'u', '--out', 'o.gif', '--repair-vision'], io)).toBe(2);
+  });
+
   it('without ffmpeg, an MP4 fails before anything is captured', async () => {
     const was = process.env.FFMPEG;
     process.env.FFMPEG = '/no/such/ffmpeg';

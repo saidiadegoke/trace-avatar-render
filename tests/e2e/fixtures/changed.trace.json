@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "meta": { "title": "Save and go on", "viewport": { "w": 640, "h": 400 } },
+  "steps": [
+    { "type": "click", "target": { "sel": "#save", "role": "button", "name": "Save the invoice" }, "say": "Save it", "timeout": 1500 },
+    { "type": "click", "target": { "sel": "#next", "role": "link", "name": "Next" }, "say": "Go on to the next part", "timeout": 1500 }
+  ]
+}

@@ -3,15 +3,26 @@
   "version": "0.1.0",
   "description": "Render a trace-avatar guide to a GIF or MP4 by playing it on your real app in headless Chromium.",
   "type": "module",
-  "bin": { "trace-avatar-render": "./dist/cli.js" },
+  "bin": {
+    "trace-avatar-render": "./dist/cli.js"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
     "./package.json": "./package.json"
   },
-  "files": ["dist", "README.md", "LICENSE"],
-  "engines": { "node": ">=20" },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsup",
     "typecheck": "tsc --noEmit",
@@ -20,14 +31,22 @@
     "live:ai": "npm run build && node scripts/live-ai.mjs",
     "check": "npm run typecheck && npm test && npm run test:e2e"
   },
-  "keywords": ["trace-avatar", "gif", "video", "render", "walkthrough", "demo", "playwright"],
+  "keywords": [
+    "trace-avatar",
+    "gif",
+    "video",
+    "render",
+    "walkthrough",
+    "demo",
+    "playwright"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
     "gifenc": "^1.0.3",
     "playwright": "^1.65.0",
     "pngjs": "^7.0.0",
-    "trace-avatar": "^0.1.2"
+    "trace-avatar": "^0.1.7"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

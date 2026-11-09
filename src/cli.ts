@@ -53,6 +53,9 @@ export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out
   --qa [strict]           send a frame per step to the AI to look for errors, empty states, a stall, personal
                           data; strict exits 1 when anything is flagged (needs a vision model)
   --alt                   write <out>.alt.txt; with --captions vtt, AI names the chapters
+  --repair                when a step can't find its element, propose a fix in <out>.repair.json (verified by
+                          playing again); still exits 1. With --ai, unsure cases are asked (DeepSeek first)
+  --repair-vision         with --repair and --ai: send a screenshot of the stalled page too
 
   Narration (MP4 only; nothing speaks without --voice):
   --voice <voice>         gateway (our AI gateway: Gemini speech, AI_GATEWAY_URL/KEY), gateway:gemini/<model>:<voice>,
@@ -103,6 +106,7 @@ export function parse(argv: string[]): Parsed {
       frame: { type: 'string' }, background: { type: 'string' }, camera: { type: 'boolean' }, zoom: { type: 'string' },
       captions: { type: 'string' }, ai: { type: 'string' }, 'ai-vision': { type: 'string' }, alt: { type: 'boolean' },
       voice: { type: 'string' }, script: { type: 'string' }, 'voice-out': { type: 'string' }, 'voice-strict': { type: 'boolean' }, 'no-voice-cache': { type: 'boolean' },
+      repair: { type: 'boolean' }, 'repair-vision': { type: 'boolean' },
     },
   });
   if (values.help) throw new UsageError('');
@@ -131,6 +135,7 @@ export function parse(argv: string[]): Parsed {
   const zoom = num('zoom', values.zoom, 1);
   if (extra.qa !== undefined && extra.qa !== true && extra.qa !== 'strict') throw new UsageError('--qa takes nothing or strict');
   if ((extra.qa !== undefined || values.alt || values['ai-vision']) && !values.ai) throw new UsageError('--qa, --alt and --ai-vision need --ai');
+  if (values['repair-vision'] && !(values.repair && values.ai)) throw new UsageError('--repair-vision needs --repair and --ai');
   if ((values.script || values['voice-out'] || values['voice-strict'] || values['no-voice-cache']) && !values.voice) throw new UsageError('--script, --voice-out, --voice-strict and --no-voice-cache need --voice');
   if (values.voice && !values.out.some((f) => /\.mp4$/i.test(f))) throw new UsageError('--voice needs an .mp4 output (a GIF has no sound)');
   const width = num('width', values.width, 16);
@@ -167,6 +172,8 @@ export function parse(argv: string[]): Parsed {
       ...(values.script ? { script: values.script } : {}),
       ...(values['voice-out'] ? { voiceOut: values['voice-out'] } : {}),
       ...(values['voice-strict'] ? { voiceStrict: true } : {}),
+      ...(values.repair ? { repair: true } : {}),
+      ...(values['repair-vision'] ? { repairVision: true } : {}),
     },
     ...(values.ai ? { ai: values.ai } : {}),
     ...(values['ai-vision'] ? { aiVision: values['ai-vision'] } : {}),

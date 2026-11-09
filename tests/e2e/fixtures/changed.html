@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>The app, a release later</title></head>
+<body style="margin:0;font:16px system-ui;background:#fff;color:#111">
+  <!-- Was <button id="save">Save</button> and <a id="next">Next</a>. -->
+  <h2 style="position:absolute;left:100px;top:20px;margin:0">New invoice</h2>
+  <button id="store" style="position:absolute;left:100px;top:100px;width:160px;height:48px">Save invoice</button>
+  <div id="status" style="position:absolute;left:100px;top:180px">Ready</div>
+  <a id="cont" href="#continue" style="position:absolute;left:100px;top:240px">Continue</a>
+  <a href="#back" style="position:absolute;left:220px;top:240px">Back</a>
+  <div class="dev" style="position:absolute;left:400px;top:100px"><button>Save (dev)</button></div>
+  <script>
+    document.getElementById('store').addEventListener('click', () => { document.getElementById('status').textContent = 'Saved'; });
+  </script>
+</body></html>

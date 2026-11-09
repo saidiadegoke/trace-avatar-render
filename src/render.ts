@@ -31,6 +31,8 @@ import type { Pcm } from './audio';
 import { linesOf, narrationText, parseScript, planNarration } from './narration';
 import type { PlannedLine, Script } from './narration';
 import type { Voice } from './voice';
+import { repairGuide, repairScriptOf, stallInspector } from './repair';
+import type { RepairOutcome } from './repair';
 import type { Segment, TimelineEvent } from './timeline';
 import { chapterCues, toVtt } from './vtt';
 import { describe as describeGuide } from 'trace-avatar/assist';
@@ -106,6 +108,11 @@ export interface RenderOptions {
   voiceStrict?: boolean;
   /** Also write the narration track here (WAV). */
   voiceOut?: string;
+  /** When a step can't find its element: propose a fix (<out>.repair.json, for `apply`), verified by playing
+   *  the guide again with it. The render still fails: a person accepts the fix. With `ai`, unsure cases are asked. */
+  repair?: boolean;
+  /** With repair and ai: send a screenshot of the stalled page too. */
+  repairVision?: boolean;
 }
 
 /** What finish() takes besides the capture: the composing options, with the cards resolved. */
@@ -189,12 +196,33 @@ export async function render(o: RenderOptions): Promise<RenderResult> {
     : null;
   if (spoken && !spoken.size) throw new RenderError('nothing to say: no step has a caption (say), and no script was given');
 
-  const cap = await capture({
-    trace, url: o.url, mode, viewport, scale: o.scale, storageState: o.storageState,
+  if (o.repairVision && !(o.repair && o.ai)) throw new RenderError('repairVision needs repair and an AI');
+  const capOpts = {
+    url: o.url, mode, viewport, scale: o.scale, storageState: o.storageState,
     playerFile: await findPlayer(o.player), hide: o.hide, blur: o.blur, rate: o.rate,
-    allowStall: o.allowStall, timeoutMs: o.timeoutMs, headless: o.headless, leadMs: LEAD_MS,
+    timeoutMs: o.timeoutMs, headless: o.headless, leadMs: LEAD_MS,
     ...(burn ? { captions: 'none' as const } : {}),
-  });
+  };
+  if (o.repair) repairScriptOf(capOpts.playerFile); // fail before the capture when the player is too old
+  let cap: Capture;
+  try {
+    cap = await capture({
+      ...capOpts, trace, allowStall: o.allowStall,
+      ...(o.repair && !o.allowStall ? { onStall: stallInspector({ script: repairScriptOf(capOpts.playerFile), trace: () => trace as never, ...(o.ai ? { ai: o.ai } : {}), ...(o.repairVision ? { vision: true } : {}), skip: [...(o.hide ?? []), ...(o.blur ?? [])] }) } : {}),
+    });
+  } catch (e) {
+    if (!(o.repair && e instanceof RenderError && e.stall)) throw e;
+    const outcome = await repairGuide({ trace: trace as never, capture: capOpts, ...(o.ai ? { ai: o.ai } : {}), ...(o.repairVision ? { vision: true } : {}), first: e });
+    const file = `${base(outs[0].file)}.repair.json`;
+    mkdirSync(dirname(file) || '.', { recursive: true });
+    writeFileSync(file, `${JSON.stringify({ task: 'repair', suggestions: outcome.suggestions, unresolved: outcome.unresolved, passed: outcome.passed }, null, 2)}\n`);
+    const n = outcome.suggestions.length;
+    const ok = outcome.suggestions.filter((x) => x.verified).length;
+    const err = new RenderError(`${e.message}\nrepair: ${n ? `${n} fix${n > 1 ? 'es' : ''} (${ok} verified${outcome.passed ? ', the guide now plays to the end' : ''})` : 'no fix found'}${outcome.unresolved.length ? `; unresolved: step ${outcome.unresolved.map((u) => u.index + 1).join(', ')}` : ''}. See ${file}${n ? `, then: trace-avatar-render apply <trace> ${file} --accept ${outcome.suggestions.map((x) => x.id).join(',')} --out <new.trace.json>` : ''}`, e.screenshot);
+    err.stall = e.stall;
+    (err as RenderError & { repair?: { file: string; outcome: RepairOutcome } }).repair = { file, outcome };
+    throw err;
+  }
   const sub = t.avatar?.name ? { sub: t.avatar.name, color: t.avatar.color } : {};
   const title = cardOf(o.titleCard, { title: t.meta?.title || 'How to', ...sub });
   const end = cardOf(o.endCard, { title: 'Done', ...sub });

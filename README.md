@@ -87,6 +87,17 @@ trace-avatar-render apply invoice.trace.json suggestions.json --accept 1,3 --out
 What is sent and never sent is the same as in the studio ([trace-avatar's AI suggestions](https://github.com/saidiadegoke/trace-avatar#ai-suggestions-optional));
 frames are sent only with `--qa`.
 
+**Repair** (`--repair`): when a step can't find its element, the renderer looks at the page as it is now, picks
+what the step means, and re-records that element as the step's target. Code scores the candidates first; an AI
+is asked only when unsure (with `--ai`, DeepSeek first; `--repair-vision` adds a screenshot). Each fix is verified by
+playing the guide again, up to 5 stalls in one run. The fixes go to `<out>.repair.json` with
+`verified`, how each was chosen and, for an unresolved step, the best 3 candidates. The render still exits 1:
+
+```sh
+trace-avatar-render invoice.trace.json --url … --out invoice.gif --repair --ai gateway
+trace-avatar-render apply invoice.trace.json invoice.repair.json --accept 1,2 --out invoice.trace.json
+```
+
 **Narration** (MP4; nothing speaks without `--voice`):
 
 | | |
