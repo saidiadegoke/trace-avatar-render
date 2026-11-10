@@ -97,6 +97,9 @@ export interface RenderOptions {
   /** 'burn' draws the steps' words into the video (the player's own bubble is then off), 'vtt' writes
    *  <out>.vtt and <out>.chapters.vtt beside the first output, 'both' does both. Default: neither. */
   captions?: 'burn' | 'vtt' | 'both';
+  /** Where burned-in captions sit: 'bottom' (the default) or 'top', for an app whose own UI is at the
+   *  bottom of the page (a toolbar, a card, a cookie bar) where the caption would cover it. */
+  captionsAt?: 'top' | 'bottom';
   /** A still at the first click: true writes <out>.png beside the first output, or give a path. */
   poster?: boolean | string;
   /** A 1.5 s card before the guide: true (the trace's title and avatar), a title, or { title, sub }. */
@@ -126,7 +129,7 @@ export interface RenderOptions {
 }
 
 /** What finish() takes besides the capture: the composing options, with the cards resolved. */
-export type FinishOptions = Pick<RenderOptions, 'cuts' | 'timeline' | 'frame' | 'background' | 'camera' | 'captions' | 'poster'> & {
+export type FinishOptions = Pick<RenderOptions, 'cuts' | 'timeline' | 'frame' | 'background' | 'camera' | 'captions' | 'captionsAt' | 'poster'> & {
   cards?: { title?: CardOptions; end?: CardOptions };
   /** Check frames with this AI (the steps give it context). */
   qa?: { ai: Ai; title?: string; steps: Array<{ n: number; type: string; say?: string }> };
@@ -377,7 +380,9 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
         drawRegion(dst, layout.content, source(i), rect);
         if (c && alpha > 0) {
           const img = art.captions.get(c.cue.text);
-          if (img) overlay(dst, img, layout.content.x + (layout.content.w - img.width) / 2, layout.content.y + layout.content.h - img.height - Math.round(layout.content.h * 0.05), alpha);
+          const gap = Math.round(layout.content.h * 0.05);
+          const y = img && (o.captionsAt === 'top' ? layout.content.y + gap : layout.content.y + layout.content.h - img.height - gap);
+          if (img && y !== undefined) overlay(dst, img, layout.content.x + (layout.content.w - img.width) / 2, y, alpha);
         }
         last = { key, img: dst };
         return dst;

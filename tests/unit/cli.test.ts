@@ -34,6 +34,9 @@ describe('cli', () => {
     expect(parse(['--title-card', 'a.trace.json', '--url', 'u', '--out', 'o.gif'])).toMatchObject({ trace: 'a.trace.json', options: { titleCard: true } });
     expect(() => parse([...base, '--frame', 'mac'])).toThrow('--frame is none or browser');
     expect(() => parse([...base, '--captions', 'srt'])).toThrow('burn, vtt or both');
+    expect(parse([...base, '--captions', 'burn', '--captions-at', 'top']).options).toMatchObject({ captions: 'burn', captionsAt: 'top' });
+    expect(none).not.toHaveProperty('captionsAt');
+    expect(() => parse([...base, '--captions-at', 'middle'])).toThrow('--captions-at is top or bottom');
     expect(() => parse([...base, '--zoom', '0.5'])).toThrow('--zoom must be');
   });
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 (unreleased)
+
+- `--captions-at top|bottom` (`captionsAt` in `render()` and `finish()`): burned-in captions can sit at the top. At
+  the bottom they covered the app's own UI when it is low on the page: trace-avatar's Fix this step card, found
+  making traceavatar.com's Repair clip.
+
 ## 0.1.2 (10 Nov 2026)
 
 - `--navigate` (`navigate: true` in `render()`): when a step is on another page, the renderer loads that page, as the

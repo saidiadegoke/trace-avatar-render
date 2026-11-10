@@ -60,6 +60,7 @@ Because the guide is known before it plays, the render can do what a screen reco
 | `--camera` | zoom in on each click and typing step before it happens, pan between close ones, back out between bursts; never on scrolls, at most one zoom change per 1.5 s. Pair with `--scale 2` for crisp zooms |
 | `--zoom <n>` | how far the camera goes in (default 1.6); implies `--camera` |
 | `--captions burn\|vtt\|both` | `burn` draws the steps' words low in the picture (the player's own bubble is then off); `vtt` writes `<out>.vtt` and `<out>.chapters.vtt` beside the first output |
+| `--captions-at top\|bottom` | where burned-in captions sit (default `bottom`); `top` when the app's own UI is low on the page (a toolbar, a card, a cookie bar) |
 | `--poster [file]` | a PNG at the first click (default `<out>.png`) |
 | `--title-card [title]` | 1.5 s first: the trace's title and the avatar, or your title; fades into the guide |
 | `--end-card [title]` | 2 s last: "Done", or your text (e.g. a URL) |

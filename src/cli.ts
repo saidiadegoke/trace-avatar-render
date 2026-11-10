@@ -47,6 +47,7 @@ export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out
   --camera                zoom in on each action and pan between close ones
   --zoom <n>              how far the camera goes in (default 1.6; implies --camera)
   --captions <burn|vtt|both>  burn the steps' words in, write <out>.vtt + <out>.chapters.vtt, or both
+  --captions-at <top|bottom>  where burned-in captions sit (default bottom; top when the app's own UI is low)
   --poster [file]         a PNG at the first click (default <out>.png)
   --title-card [title]    a 1.5 s card first (default: the trace's title)
   --end-card [title]      a 2 s card last (default: "Done")
@@ -111,7 +112,7 @@ export function parse(argv: string[]): Parsed {
       'allow-stall': { type: 'boolean' }, navigate: { type: 'boolean' }, security: { type: 'string' }, value: { type: 'string', multiple: true }, player: { type: 'string' }, timeline: { type: 'string' },
       timeout: { type: 'string' }, headed: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
       frame: { type: 'string' }, background: { type: 'string' }, camera: { type: 'boolean' }, zoom: { type: 'string' },
-      captions: { type: 'string' }, ai: { type: 'string' }, 'ai-vision': { type: 'string' }, alt: { type: 'boolean' },
+      captions: { type: 'string' }, 'captions-at': { type: 'string' }, ai: { type: 'string' }, 'ai-vision': { type: 'string' }, alt: { type: 'boolean' },
       voice: { type: 'string' }, script: { type: 'string' }, 'voice-out': { type: 'string' }, 'voice-strict': { type: 'boolean' }, 'no-voice-cache': { type: 'boolean' },
       repair: { type: 'boolean' }, 'repair-vision': { type: 'boolean' }, report: { type: 'string' },
     },
@@ -139,6 +140,8 @@ export function parse(argv: string[]): Parsed {
   if (values.frame && values.frame !== 'none' && values.frame !== 'browser') throw new UsageError('--frame is none or browser');
   const captions = values.captions;
   if (captions !== undefined && captions !== 'burn' && captions !== 'vtt' && captions !== 'both') throw new UsageError('--captions is burn, vtt or both');
+  const captionsAt = values['captions-at'];
+  if (captionsAt !== undefined && captionsAt !== 'top' && captionsAt !== 'bottom') throw new UsageError('--captions-at is top or bottom');
   const zoom = num('zoom', values.zoom, 1);
   if (extra.qa !== undefined && extra.qa !== true && extra.qa !== 'strict') throw new UsageError('--qa takes nothing or strict');
   if ((extra.qa !== undefined || values.alt || values['ai-vision']) && !values.ai) throw new UsageError('--qa, --alt and --ai-vision need --ai');
@@ -188,6 +191,7 @@ export function parse(argv: string[]): Parsed {
       ...(values.background ? { background: values.background } : {}),
       ...(zoom ? { camera: { zoom } } : values.camera ? { camera: true } : {}),
       ...(captions ? { captions } : {}),
+      ...(captionsAt ? { captionsAt: captionsAt as 'top' | 'bottom' } : {}),
       ...(extra.poster !== undefined ? { poster: extra.poster } : {}),
       ...(extra.title !== undefined ? { titleCard: extra.title } : {}),
       ...(extra.end !== undefined ? { endCard: extra.end } : {}),

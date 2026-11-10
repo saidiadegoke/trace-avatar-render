@@ -84,4 +84,35 @@ describe('finish: from a capture to a GIF', () => {
     expect(readFileSync(r.chapters!, 'utf8')).toContain('Wait for it.\n');
     expect(r.offsetMs).toBe(0);
   });
+
+  it('burned-in captions sit low by default, high with captionsAt: top (for an app whose own UI is low)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tar-'));
+    const white = () => { const p = new PNG({ width: 480, height: 300 }); p.data.fill(255); return PNG.sync.write(p); };
+    const t0 = 2_000_000;
+    const cap = (): Capture => ({
+      frames: Array.from({ length: 31 }, (_, k) => ({ t: t0 + k * 100, png: white() })),
+      events: [{ t: t0, type: 'play' }, { t: t0 + 2000, type: 'step', stepType: 'hover', say: 'A caption to place' }, { t: t0 + 3000, type: 'end' }],
+      playAt: t0, stopAt: t0 + 3000, endAt: t0 + 3000,
+    });
+    const darkRows = async (at?: 'top' | 'bottom') => {
+      const file = join(dir, `${at ?? 'default'}.gif`);
+      await finish(cap(), [{ file, format: 'gif', fps: 10 }], { captions: 'burn', cuts: { maxWaitMs: 0 }, ...(at ? { captionsAt: at } : {}) });
+      const g = new omggif.GifReader(new Uint8Array(readFileSync(file)));
+      const px = new Uint8Array(g.width * g.height * 4);
+      // The frame showing at 1.8 s (the caption shows); repeated frames are merged, so walk the delays.
+      for (let i = 0, t = 0; i < g.numFrames() && t <= 1800; t += g.frameInfo(i).delay * 10, i += 1) g.decodeAndBlitFrameRGBA(i, px);
+      const rows = { top: 0, bottom: 0 };
+      for (let y = 0; y < g.height; y += 1) for (let x = 0; x < g.width; x += 1) {
+        const k = (y * g.width + x) * 4;
+        if (px[k] + px[k + 1] + px[k + 2] < 200) rows[y < g.height / 2 ? 'top' : 'bottom'] += 1;
+      }
+      return rows;
+    };
+    const low = await darkRows();
+    expect(low.bottom).toBeGreaterThan(500);
+    expect(low.top).toBe(0);
+    const high = await darkRows('top');
+    expect(high.top).toBeGreaterThan(500);
+    expect(high.bottom).toBe(0);
+  }, 30_000);
 });
