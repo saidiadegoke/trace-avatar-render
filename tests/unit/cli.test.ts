@@ -46,6 +46,16 @@ describe('cli', () => {
     expect(cardOf({ title: 'X', sub: 'acme.com' }, fb)).toEqual({ title: 'X', sub: 'acme.com', color: '#f0a' });
   });
 
+  it('--security and --value go to the player in perform mode', () => {
+    const base = ['a.trace.json', '--url', 'u', '--out', 'o.gif', '--mode', 'perform', '--allow-perform'];
+    expect(parse([...base, '--security', 'all', '--value', 'password=demo=pass', '--value', 'PIN=1234']).options).toMatchObject({ security: true, values: { password: 'demo=pass', PIN: '1234' } });
+    expect(parse([...base, '--security', 'secrets, files']).options).toMatchObject({ security: ['secrets', 'files'] });
+    expect(parse([...base]).options).not.toHaveProperty('security');
+    expect(() => parse([...base, '--security', 'cards'])).toThrow(/secrets, money, files/);
+    expect(() => parse([...base, '--value', 'nope'])).toThrow(/name=text/);
+    expect(() => parse(['a.trace.json', '--url', 'u', '--out', 'o.gif', '--value', 'a=b'])).toThrow(/--mode perform/);
+  });
+
   it('wrong usage exits 2 with the reason and the usage; --help exits 0', async () => {
     const run = async (argv: string[]) => { const err: string[] = []; const code = await main(argv, { log: () => {}, error: (m: string) => err.push(m) }); return { code, err: err.join('\n') }; };
     for (const [argv, why] of [

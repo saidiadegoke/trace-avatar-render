@@ -28,6 +28,12 @@ export interface CaptureOptions {
   /** Selectors blurred before capture, as well as [data-trace-blur]. */
   blur?: string[];
   rate?: number;
+  /** When a step is on another page, load that page (as an app's router would) instead of waiting for it. */
+  navigate?: boolean;
+  /** Perform mode: what the guide leaves to the viewer (trace-avatar's `security`). */
+  security?: boolean | string[];
+  /** Perform mode: values to type, by name or field label (trace-avatar's `values`). */
+  values?: Record<string, string>;
   /** The player's own captions: 'none' when the renderer burns them in itself. Default: the player's. */
   captions?: 'bubble' | 'bar' | 'none';
   /** A guide's own pause (or a hand-off) is held this long, then it plays on. Default 1200. */
@@ -66,7 +72,7 @@ export class RenderError extends Error {
   constructor(message: string, public readonly screenshot?: Buffer) { super(message); this.name = 'RenderError'; }
 }
 
-interface BootConfig { trace: unknown; mode: string; key: string; hide: string[]; blur: string[]; rate?: number; pauseHoldMs: number; captions?: string }
+interface BootConfig { trace: unknown; mode: string; key: string; hide: string[]; blur: string[]; rate?: number; pauseHoldMs: number; captions?: string; navigate?: boolean; security?: boolean | string[]; values?: Record<string, string> }
 
 /** Runs in the page (serialised): start the player and report its events. */
 function bootstrap(cfg: BootConfig) {
@@ -83,7 +89,13 @@ function bootstrap(cfg: BootConfig) {
     style.textContent = (cfg.hide.length ? `${cfg.hide.join(',')}{visibility:hidden!important}\n` : '')
       + `${['[data-trace-blur]', ...cfg.blur].join(',')}{filter:blur(8px)!important}`;
     (document.head || document.documentElement).append(style);
-    c = w.__taPlayer.createTrace({ trace: cfg.trace, mode: cfg.mode, autoplay: false, controls: false, resumeKey: cfg.key, ...(cfg.rate ? { rate: cfg.rate } : {}), ...(cfg.captions ? { captions: cfg.captions } : {}) });
+    c = w.__taPlayer.createTrace({
+      trace: cfg.trace, mode: cfg.mode, autoplay: false, controls: false, resumeKey: cfg.key, ...(cfg.rate ? { rate: cfg.rate } : {}), ...(cfg.captions ? { captions: cfg.captions } : {}),
+      // A step on another page: go there, as an app's router would (the player carries on after the load).
+      ...(cfg.navigate ? { navigate: (path: string) => { location.assign(path); } } : {}),
+      ...(cfg.security !== undefined ? { security: cfg.security } : {}),
+      ...(cfg.values ? { values: cfg.values } : {}),
+    });
     w.__taRender = c;
     c.on('state', ({ phase }: { phase: string }) => {
       send({ type: 'state', phase });
@@ -110,7 +122,7 @@ function bootstrap(cfg: BootConfig) {
       send({ type: 'handoff', index: e.index });
       // A masked field: type its bullets, so the video never holds the real text.
       const el = e.element as HTMLInputElement | null;
-      if (el && 'value' in el) {
+      if (e.step.type === 'type' && el && 'value' in el) {
         el.focus();
         el.value = e.step.text ?? '';
         el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -134,6 +146,9 @@ export async function capture(o: CaptureOptions): Promise<Capture> {
   const cfg: BootConfig = {
     trace: o.trace, mode: o.mode, key: 'trace-avatar-render', hide: o.hide ?? [], blur: o.blur ?? [],
     ...(o.rate ? { rate: o.rate } : {}), pauseHoldMs: o.pauseHoldMs ?? 1200, ...(o.captions ? { captions: o.captions } : {}),
+    ...(o.navigate ? { navigate: true } : {}),
+    ...(o.security !== undefined ? { security: o.security } : {}),
+    ...(o.values ? { values: o.values } : {}),
   };
   // Init scripts run wrapped in a function, so the player's top-level `var TraceAvatar` stays local: keep our
   // own reference (a page may also load another build under the same global name).

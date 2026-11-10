@@ -43,6 +43,9 @@ Because the guide is known before it plays, the render can do what a screen reco
 | `--hide <selector>` | hidden before capture (your dev toolbars); repeatable |
 | `--blur <selector>` | blurred before capture, as well as `[data-trace-blur]` in your app; repeatable |
 | `--allow-stall` | render a stalled guide instead of failing |
+| `--navigate` | when a step is on another page, load that page as your app's router would. Without it, a Show me guide that crosses pages waits on "Open … to continue" |
+| `--security [guards]` | Do it for me: leave these to the viewer, as trace-avatar's `security`: `all`, or `secrets,money,files`. A hand-off is held for a beat, then the guide plays on |
+| `--value name=text` | Do it for me: a value to type, by name or field label (`password=demo-pass`), as trace-avatar's `values`; repeatable. A password field still shows bullets |
 | `--player <file>` | the `trace-perform.min.js` to use (default: the installed trace-avatar; or set `TRACE_AVATAR_PLAYER`) |
 | `--timeline <file>` | write the player's events and the cuts as JSON |
 | `--timeout <ms>` | give up after this long (default 120000) |

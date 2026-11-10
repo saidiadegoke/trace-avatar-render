@@ -97,6 +97,19 @@ describe('render (Chromium)', () => {
     expect(seen).toEqual(['|••••••']);
   });
 
+  it('navigate: a Show me guide that crosses pages loads the next page; without it, it never gets there', async () => {
+    const trace = join(FIX, 'show-pages.trace.json');
+    const stuck = await render({ trace, url: `${base}/app.html`, out: [join(out, 'nav0.gif')], timeoutMs: 6000 }).catch((e) => e);
+    expect(stuck).toBeInstanceOf(RenderError);
+    expect(stuck.message).toContain('timed out');
+    const r = await render({ trace, url: `${base}/app.html`, out: [join(out, 'nav.gif')], navigate: true });
+    expect(r.events.find((e) => e.type === 'end')!.url).toBe('/page2.html');
+    expect(r.events.map((e) => e.type)).not.toContain('error');
+    const logs: string[] = [];
+    const code = await main([trace, '--url', `${base}/app.html`, '--navigate', '--out', join(out, 'nav-cli.gif')], { log: (m: string) => logs.push(m), error: (m: string) => logs.push(m) });
+    expect(code, logs.join('\n')).toBe(0);
+  });
+
   it('a stalled guide fails (RenderError, with a screenshot); --allow-stall renders it', async () => {
     const err = await render({ trace: join(FIX, 'stall.trace.json'), url: `${base}/app.html`, out: [join(out, 's.gif')] }).catch((e) => e);
     expect(err).toBeInstanceOf(RenderError);

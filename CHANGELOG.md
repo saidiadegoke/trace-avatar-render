@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.2 (10 Nov 2026)
+
+- `--navigate` (`navigate: true` in `render()`): when a step is on another page, the renderer loads that page, as the
+  app's router would (the player's `navigate`), and the guide carries on there. Without it, a Show me guide that
+  crosses pages (Show me never clicks) waited on "Open … to continue" until the render timed out. Found rendering
+  DutyCaptain's guides for traceavatar.com, and needed by its nightly guide checks.
+- `--security [guards]` and `--value name=text` (`security`, `values` in `render()`): Do it for me's security and
+  run-time values, passed to the player (trace-avatar 0.1.14 or later). An upload hand-off no longer writes into the
+  step's element.
+- trace-avatar ^0.1.13: 0.1.9 typed the first letter of a rich-text field (Lexical) away ("ind the opening hours").
+
 ## 0.1.1 (10 Nov 2026)
 
 - `--report <file>` writes one guide's outcome as JSON, whatever the exit code: `{ outcome: 'passed' | 'stalled' |

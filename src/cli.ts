@@ -30,6 +30,10 @@ export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out
   --hide <selector>       hidden before capture; repeatable
   --blur <selector>       blurred before capture (as well as [data-trace-blur]); repeatable
   --allow-stall           render a stalled guide anyway instead of failing
+  --navigate              a step on another page: load that page, as the app's router would (without it, a
+                          Show me guide that crosses pages waits on "Open … to continue")
+  --security [guards]     perform: leave these to the viewer (a hand-off): all, or secrets,money,files
+  --value <name=text>     perform: a value to type, by name or field label (e.g. password=demo-pass); repeatable
   --player <file>         the trace-perform.min.js to use (default: the installed trace-avatar)
   --timeline <file>       write the timeline and the cuts as JSON
   --timeout <ms>          give up after this long (default 120000)
@@ -104,7 +108,7 @@ export function parse(argv: string[]): Parsed {
       'allow-perform': { type: 'boolean' }, width: { type: 'string' }, fps: { type: 'string' },
       viewport: { type: 'string' }, scale: { type: 'string' }, 'storage-state': { type: 'string' },
       'max-wait': { type: 'string' }, hide: { type: 'string', multiple: true }, blur: { type: 'string', multiple: true },
-      'allow-stall': { type: 'boolean' }, player: { type: 'string' }, timeline: { type: 'string' },
+      'allow-stall': { type: 'boolean' }, navigate: { type: 'boolean' }, security: { type: 'string' }, value: { type: 'string', multiple: true }, player: { type: 'string' }, timeline: { type: 'string' },
       timeout: { type: 'string' }, headed: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
       frame: { type: 'string' }, background: { type: 'string' }, camera: { type: 'boolean' }, zoom: { type: 'string' },
       captions: { type: 'string' }, ai: { type: 'string' }, 'ai-vision': { type: 'string' }, alt: { type: 'boolean' },
@@ -141,6 +145,20 @@ export function parse(argv: string[]): Parsed {
   if (values['repair-vision'] && !(values.repair && values.ai)) throw new UsageError('--repair-vision needs --repair and --ai');
   if ((values.script || values['voice-out'] || values['voice-strict'] || values['no-voice-cache']) && !values.voice) throw new UsageError('--script, --voice-out, --voice-strict and --no-voice-cache need --voice');
   if (values.voice && !values.out.some((f) => /\.mp4$/i.test(f))) throw new UsageError('--voice needs an .mp4 output (a GIF has no sound)');
+  let security: boolean | string[] | undefined;
+  if (values.security !== undefined) {
+    const s = values.security.trim().toLowerCase();
+    const guards = s === '' || s === 'all' || s === 'true' ? true : s.split(/[\s,]+/).filter(Boolean);
+    if (Array.isArray(guards) && guards.some((g) => !['secrets', 'money', 'files'].includes(g))) throw new UsageError('--security is all, or a list of secrets, money, files');
+    security = guards;
+  }
+  const typed: Record<string, string> = {};
+  for (const v of values.value ?? []) {
+    const k = v.indexOf('=');
+    if (k < 1) throw new UsageError('--value is name=text, e.g. password=demo-pass');
+    typed[v.slice(0, k)] = v.slice(k + 1);
+  }
+  if ((security !== undefined || values.value?.length) && mode !== 'perform') throw new UsageError('--security and --value are for --mode perform');
   const width = num('width', values.width, 16);
   const fps = num('fps', values.fps, 1);
   const maxWait = num('max-wait', values['max-wait']);
@@ -159,6 +177,9 @@ export function parse(argv: string[]): Parsed {
       ...(values.hide ? { hide: values.hide } : {}),
       ...(values.blur ? { blur: values.blur } : {}),
       allowStall: !!values['allow-stall'],
+      ...(values.navigate ? { navigate: true } : {}),
+      ...(security !== undefined ? { security } : {}),
+      ...(values.value?.length ? { values: typed } : {}),
       ...(values.player ? { player: values.player } : {}),
       ...(values.timeline ? { timeline: values.timeline } : {}),
       ...(values.timeout ? { timeoutMs: num('timeout', values.timeout, 1) } : {}),

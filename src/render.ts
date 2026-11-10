@@ -70,6 +70,15 @@ export interface RenderOptions {
   cuts?: { maxWaitMs?: number };
   /** Render a stalled guide anyway instead of failing. */
   allowStall?: boolean;
+  /**
+   * When a step is on another page, load it, as the app's router would (`navigate` in the player). Without it, a
+   * Show me guide that crosses pages waits on "Open … to continue" until the render times out.
+   */
+  navigate?: boolean;
+  /** Perform mode: what the guide leaves to the viewer, as trace-avatar's `security` (true, or 'secrets', 'money', 'files'). Default none. */
+  security?: boolean | string[];
+  /** Perform mode: values to type, by name or field label, e.g. { password: 'demo-pass' } (trace-avatar's `values`). */
+  values?: Record<string, string>;
   hide?: string[];
   blur?: string[];
   rate?: number;
@@ -201,7 +210,8 @@ export async function render(o: RenderOptions): Promise<RenderResult> {
   const capOpts = {
     url: o.url, mode, viewport, scale: o.scale, storageState: o.storageState,
     playerFile: await findPlayer(o.player), hide: o.hide, blur: o.blur, rate: o.rate,
-    timeoutMs: o.timeoutMs, headless: o.headless, leadMs: LEAD_MS,
+    timeoutMs: o.timeoutMs, headless: o.headless, leadMs: LEAD_MS, ...(o.navigate ? { navigate: true } : {}),
+    ...(o.security !== undefined ? { security: o.security } : {}), ...(o.values ? { values: o.values } : {}),
     ...(burn ? { captions: 'none' as const } : {}),
   };
   if (o.repair) repairScriptOf(capOpts.playerFile); // fail before the capture when the player is too old

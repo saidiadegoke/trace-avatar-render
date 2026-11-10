@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "meta": { "title": "Show me across two pages", "viewport": { "w": 640, "h": 400 }, "seed": 5 },
+  "steps": [
+    { "type": "hover", "page": "/app.html", "target": { "sel": "#go" }, "hold": 300, "say": "Start here." },
+    { "type": "hover", "page": "/page2.html", "target": { "sel": "#finish" }, "hold": 300, "say": "Then finish here." }
+  ]
+}
