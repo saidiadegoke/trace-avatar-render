@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 (10 Nov 2026)
+
+- `--report <file>` writes one guide's outcome as JSON, whatever the exit code: `{ outcome: 'passed' | 'stalled' |
+  'failed', step, reason, message }`. A stall names its step (from 0), why (`not-found` or `until-timeout`) and
+  that step's caption, plus `repair` when `--repair` wrote `<out>.repair.json`. For CI jobs that check many guides
+  and keep the results (DutyCaptain's guide checks).
 
 - `--repair` fixes a wait whose text changed (`until-timeout`): the texts where it looks and those that showed while
   it waited are scored (code first, `--ai` only when unsure); a fix of `kind: 'until'` goes to `<out>.repair.json`,

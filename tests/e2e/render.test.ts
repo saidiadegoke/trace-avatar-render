@@ -116,6 +116,16 @@ describe('render (Chromium)', () => {
     expect(existsSync(join(out, 'bad.failure.png'))).toBe(true);
   });
 
+  it('--report writes what happened, for a pass and for a stall, whatever the exit code', async () => {
+    const io = { log: () => {}, error: () => {} };
+    const ok = join(out, 'ok.report.json');
+    expect(await main([join(FIX, 'show.trace.json'), '--url', `${base}/app.html`, '--out', join(out, 'r1.gif'), '--fps', '6', '--report', ok], io)).toBe(0);
+    expect(JSON.parse(readFileSync(ok, 'utf8'))).toEqual({ outcome: 'passed', step: null, reason: null, message: null });
+    const bad = join(out, 'bad.report.json');
+    expect(await main([join(FIX, 'stall.trace.json'), '--url', `${base}/app.html`, '--out', join(out, 'r2.gif'), '--report', bad], io)).toBe(1);
+    expect(JSON.parse(readFileSync(bad, 'utf8'))).toMatchObject({ outcome: 'stalled', step: 0, reason: 'not-found', message: expect.stringContaining('stalled') });
+  });
+
   it('polish: a browser window, the camera, burned-in captions, title and end cards, VTT and a poster', async () => {
     const file = join(out, 'polish.gif');
     const r = await render({

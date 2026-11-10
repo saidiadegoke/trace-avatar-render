@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { main, parse, USAGE } from '../../src/cli';
+import { main, parse, reportOf, USAGE } from '../../src/cli';
+import { RenderError } from '../../src/capture';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { mp4Args, findFfmpeg } from '../../src/mp4';
 import { cardOf, formatOf } from '../../src/render';
 
@@ -70,5 +74,21 @@ describe('cli', () => {
     expect(mp4Args('o.mp4', 30, { width: 640, height: 400 })).toEqual(['-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', '640x400', '-framerate', '30', '-i', '-',
       '-vf', 'format=yuv420p', '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-r', '30', '-movflags', '+faststart', 'o.mp4']);
     expect(findFfmpeg({ FFMPEG: '/no/such/ffmpeg' })).toBeNull();
+  });
+
+  it('--report: parsed, and the report says passed, stalled (with the step and its caption) or failed', () => {
+    expect(parse(['a.json', '--url', 'u', '--out', 'o.gif', '--report', 'r.json']).report).toBe('r.json');
+    expect(parse(['a.json', '--url', 'u', '--out', 'o.gif']).report).toBeUndefined();
+    const dir = mkdtempSync(join(tmpdir(), 'tar-report-'));
+    const trace = join(dir, 't.json');
+    writeFileSync(trace, JSON.stringify({ version: 1, steps: [{ type: 'note', say: 'Hi' }, { type: 'click', target: { sel: '#x' }, say: 'Click Save.' }] }));
+    expect(reportOf(null, trace)).toEqual({ outcome: 'passed', step: null, reason: null, message: null });
+    const stall = new RenderError('step 2 stalled (until-timeout)');
+    stall.stall = { index: 1, reason: 'until-timeout' };
+    expect(reportOf(stall, trace)).toEqual({ outcome: 'stalled', step: 1, reason: 'until-timeout', message: 'Click Save.' });
+    const repair = join(dir, 'o.repair.json');
+    writeFileSync(repair, '{}');
+    expect(reportOf(stall, trace, repair).repair).toBe(repair);
+    expect(reportOf(new Error('net::ERR_CONNECTION_REFUSED'), trace)).toEqual({ outcome: 'failed', step: null, reason: null, message: 'net::ERR_CONNECTION_REFUSED' });
   });
 });

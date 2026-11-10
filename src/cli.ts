@@ -5,7 +5,7 @@
  * Exit codes: 0 rendered, 1 the render failed (a stalled guide, an error in the app), 2 wrong usage.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { apply as applySuggestions, suggest } from 'trace-avatar/assist';
 import type { Suggestion } from 'trace-avatar/assist';
 import { providerOf } from './ai';
@@ -33,6 +33,8 @@ export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out
   --player <file>         the trace-perform.min.js to use (default: the installed trace-avatar)
   --timeline <file>       write the timeline and the cuts as JSON
   --timeout <ms>          give up after this long (default 120000)
+  --report <file>         write what happened as JSON: { outcome: passed|stalled|failed, step, reason, message }
+                          (for CI: one result per guide, whatever the exit code)
   --headed                show the browser
 
   Polish (all off by default):
@@ -73,7 +75,7 @@ Suggestions for a person to accept (the renderer never changes a trace):
   trace-avatar-render apply <trace.json> <suggestions.json> --accept 1,3|all --out <new.trace.json>
 `;
 
-export interface Parsed { trace: string; options: Parameters<typeof render>[0]; /** --ai, made into a provider by main(). */ ai?: string; /** --ai-vision */ aiVision?: string; /** --voice, made into a Voice by main() */ voice?: string; /** --no-voice-cache */ noVoiceCache?: boolean; /** --qa strict */ strict?: boolean }
+export interface Parsed { /** --report */ report?: string; trace: string; options: Parameters<typeof render>[0]; /** --ai, made into a provider by main(). */ ai?: string; /** --ai-vision */ aiVision?: string; /** --voice, made into a Voice by main() */ voice?: string; /** --no-voice-cache */ noVoiceCache?: boolean; /** --qa strict */ strict?: boolean }
 
 /** Parse the command line. Throws a usage message (exit 2) on mistakes. Exported for tests. */
 export function parse(argv: string[]): Parsed {
@@ -107,7 +109,7 @@ export function parse(argv: string[]): Parsed {
       frame: { type: 'string' }, background: { type: 'string' }, camera: { type: 'boolean' }, zoom: { type: 'string' },
       captions: { type: 'string' }, ai: { type: 'string' }, 'ai-vision': { type: 'string' }, alt: { type: 'boolean' },
       voice: { type: 'string' }, script: { type: 'string' }, 'voice-out': { type: 'string' }, 'voice-strict': { type: 'boolean' }, 'no-voice-cache': { type: 'boolean' },
-      repair: { type: 'boolean' }, 'repair-vision': { type: 'boolean' },
+      repair: { type: 'boolean' }, 'repair-vision': { type: 'boolean' }, report: { type: 'string' },
     },
   });
   if (values.help) throw new UsageError('');
@@ -181,7 +183,35 @@ export function parse(argv: string[]): Parsed {
     ...(values.voice ? { voice: values.voice } : {}),
     ...(values['no-voice-cache'] ? { noVoiceCache: true } : {}),
     ...(extra.qa === 'strict' ? { strict: true } : {}),
+    ...(values.report ? { report: values.report } : {}),
   };
+}
+
+/** What --report writes: one guide's outcome, for CI. */
+export interface Report {
+  outcome: 'passed' | 'stalled' | 'failed';
+  /** The stalled step (from 0); null otherwise. */
+  step: number | null;
+  reason: 'not-found' | 'until-timeout' | null;
+  /** The stalled step's caption, or the error. */
+  message: string | null;
+  /** The repair file, when --repair wrote one. */
+  repair?: string;
+}
+
+/** The report for a render's outcome (exported for tests). */
+export function reportOf(err: unknown, traceFile: string, repairFile?: string): Report {
+  if (!err) return { outcome: 'passed', step: null, reason: null, message: null };
+  const stall = err instanceof RenderError ? err.stall : undefined;
+  if (stall && Number.isInteger(stall.index)) {
+    let say: string | null = null;
+    try { say = ((JSON.parse(readFileSync(traceFile, 'utf8')) as { steps?: Array<{ say?: string }> }).steps?.[stall.index]?.say) ?? null; } catch { /* the error is enough */ }
+    return {
+      outcome: 'stalled', step: stall.index, reason: stall.reason === 'until-timeout' ? 'until-timeout' : 'not-found',
+      message: say ?? (err as Error).message, ...(repairFile && existsSync(repairFile) ? { repair: repairFile } : {}),
+    };
+  }
+  return { outcome: 'failed', step: null, reason: null, message: (err as Error)?.message ?? String(err) };
 }
 
 export class UsageError extends Error {}
@@ -213,6 +243,7 @@ export async function main(argv: string[], io = { log: console.log, error: conso
       if (r.narration.wav) io.log(r.narration.wav);
     }
     for (const w of r.warnings ?? []) io.error(`warning: ${w}`);
+    if (p.report) writeFileSync(p.report, `${JSON.stringify(reportOf(null, p.trace), null, 2)}\n`);
     if (r.qa) {
       if (!r.qa.length) io.log('qa: nothing flagged');
       for (const f of r.qa) io.log(`qa: ${(f.at / 1000).toFixed(1)} s  ${f.kind}  ${f.note}`);
@@ -221,6 +252,11 @@ export async function main(argv: string[], io = { log: console.log, error: conso
     return 0;
   } catch (e) {
     io.error(`trace-avatar-render: ${(e as Error).message}`);
+    if (p.report) {
+      const first = p.options.out[0];
+      const base = (typeof first === 'string' ? first : first.file).replace(/\.[^./]+$/, '');
+      writeFileSync(p.report, `${JSON.stringify(reportOf(e, p.trace, `${base}.repair.json`), null, 2)}\n`);
+    }
     if (e instanceof RenderError && e.screenshot) {
       const first = p.options.out[0];
       const shot = `${(typeof first === 'string' ? first : first.file).replace(/\.[^./]+$/, '')}.failure.png`;
