@@ -60,7 +60,7 @@
     "gifenc": "^1.0.3",
     "playwright": "^1.65.0",
     "pngjs": "^7.0.0",
-    "trace-avatar": "^0.1.13"
+    "trace-avatar": "^0.1.14"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -5,6 +5,8 @@
 - `--captions-at top|bottom` (`captionsAt` in `render()` and `finish()`): burned-in captions can sit at the top. At
   the bottom they covered the app's own UI when it is low on the page: trace-avatar's Fix this step card, found
   making traceavatar.com's Repair clip.
+- Needs trace-avatar ^0.1.14 (was ^0.1.13): `--value` and `--security` are 0.1.14's `values` and `security`. With
+  0.1.13 a `--value` was silently ignored, and Do it for me skipped the field (found making a SpeedyMessaging clip).
 
 ## 0.1.2 (10 Nov 2026)
 
