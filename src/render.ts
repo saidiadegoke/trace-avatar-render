@@ -22,6 +22,8 @@ import type { Image } from './image';
 import { createLayers, DEFAULT_BACKGROUND } from './layers';
 import type { CardOptions, Layers } from './layers';
 import { layoutOf } from './layout';
+import { canvasOf, watermarkOf } from './brand';
+import type { CanvasSpec, Corner, Watermark } from './brand';
 import type { FrameStyle, Layout } from './layout';
 import { encodeMp4, findFfmpeg } from './mp4';
 import { actionsOf, cueAt, pageAt, stepCues } from './plan';
@@ -104,8 +106,13 @@ export interface RenderOptions {
   poster?: boolean | string;
   /** A 1.5 s card before the guide: true (the trace's title and avatar), a title, or { title, sub }. */
   titleCard?: boolean | string | CardOptions;
-  /** A 2 s card after it: true ("Done"), a title, or { title, sub }. */
+  /** A 2 s card after it: true ("Done"), a title, or { title, sub, url, logo }. */
   endCard?: boolean | string | CardOptions;
+  /** Compose onto a picture of this shape: '9:16' (1080×1920), '4:5', '1:1', '16:9', 'WxH' or { width, height }.
+   *  The app is placed between safe margins on the background; an output's width scales the whole canvas. */
+  canvas?: CanvasSpec;
+  /** A small badge on every frame, cards included: its text, or { text, at, opacity, logo }. */
+  watermark?: string | Watermark;
   /** The AI for qa and alt (see trace-avatar/assist). Without it nothing calls a model. */
   ai?: Ai;
   /** Send a frame per step (640 px) to the AI to look for errors, empty states, a stall, personal data. */
@@ -129,7 +136,7 @@ export interface RenderOptions {
 }
 
 /** What finish() takes besides the capture: the composing options, with the cards resolved. */
-export type FinishOptions = Pick<RenderOptions, 'cuts' | 'timeline' | 'frame' | 'background' | 'camera' | 'captions' | 'captionsAt' | 'poster'> & {
+export type FinishOptions = Pick<RenderOptions, 'cuts' | 'timeline' | 'frame' | 'background' | 'camera' | 'captions' | 'captionsAt' | 'poster' | 'canvas' | 'watermark'> & {
   cards?: { title?: CardOptions; end?: CardOptions };
   /** Check frames with this AI (the steps give it context). */
   qa?: { ai: Ai; title?: string; steps: Array<{ n: number; type: string; say?: string }> };
@@ -321,6 +328,8 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
   const scale = cap.viewport ? srcW / cap.viewport.w : 1;
 
   const frameStyle = o.frame ?? 'none';
+  const canvas = o.canvas !== undefined ? canvasOf(o.canvas) : undefined;
+  const mark = o.watermark !== undefined ? watermarkOf(o.watermark) : undefined;
   const background = o.background ?? DEFAULT_BACKGROUND;
   const burn = o.captions === 'burn' || o.captions === 'both';
   const variant = (sg: Segment[]) => {
@@ -338,7 +347,7 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
   const titleMs = o.cards?.title ? TITLE_MS : 0;
   const endMs = o.cards?.end ? END_MS : 0;
   const full: Rect = { x: 0, y: 0, w: srcW, h: srcH };
-  const needLayers = frameStyle !== 'none' || (burn && (cues.length > 0 || plain.cues.length > 0)) || !!o.cards?.title || !!o.cards?.end;
+  const needLayers = frameStyle !== 'none' || !!canvas || !!mark || (burn && (cues.length > 0 || plain.cues.length > 0)) || !!o.cards?.title || !!o.cards?.end;
 
   const browser = needLayers ? await chromium.launch() : null;
   let layers: Layers | null = null;
@@ -352,14 +361,14 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
     for (const [n, out] of outs.entries()) {
       mkdirSync(dirname(out.file) || '.', { recursive: true });
       const fps = out.fps ?? (out.format === 'gif' ? 12 : 30);
-      const layout = layoutOf(srcW, srcH, out.width ?? (out.format === 'gif' ? 800 : undefined), frameStyle);
+      const layout = layoutOf(srcW, srcH, out.width ?? (out.format === 'gif' ? 800 : undefined), frameStyle, canvas);
       // A GIF has no sound, so it keeps the timing without holds.
       const v = out.format === 'gif' ? plain : main;
       const { cam, segs, contentMs } = v;
       const cues = v.cues;
       const times = frameTimes(segs, fps);
       const picks = pickFrames(stamps, times);
-      const art = await artFor(layers, layout, { frameStyle, background, cues: burn ? cues : [], urls: [...new Set(cap.events.map((e) => e.url).filter(Boolean) as string[])], titles: cap.titles ?? {}, cards: o.cards });
+      const art = await artFor(layers, layout, { frameStyle, background, cues: burn ? cues : [], urls: [...new Set(cap.events.map((e) => e.url).filter(Boolean) as string[])], titles: cap.titles ?? {}, cards: o.cards, mark });
 
       const nTitle = Math.round((titleMs * fps) / 1000);
       const nEnd = Math.round((endMs * fps) / 1000);
@@ -381,9 +390,24 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
         if (c && alpha > 0) {
           const img = art.captions.get(c.cue.text);
           const gap = Math.round(layout.content.h * 0.05);
-          const y = img && (o.captionsAt === 'top' ? layout.content.y + gap : layout.content.y + layout.content.h - img.height - gap);
-          if (img && y !== undefined) overlay(dst, img, layout.content.x + (layout.content.w - img.width) / 2, y, alpha);
+          let y = img && (o.captionsAt === 'top' ? layout.content.y + gap : layout.content.y + layout.content.h - img.height - gap);
+          // On a canvas the caption goes in the room beside the app (below it, or above with captionsAt top), when it fits.
+          if (img && layout.canvas) {
+            const g2 = Math.round(layout.height * 0.02);
+            const below = layout.window.y + layout.window.h + g2;
+            const above = layout.window.y - g2 - img.height;
+            if (o.captionsAt === 'top' ? above >= g2 : below + img.height <= layout.height - g2) y = o.captionsAt === 'top' ? above : below;
+          }
+          const x = img ? (layout.canvas ? (layout.width - img.width) / 2 : layout.content.x + (layout.content.w - img.width) / 2) : 0;
+          // Clear of the watermark: a caption that would touch it moves away from it (up, or down at the top).
+          if (img && y !== undefined && art.badge) {
+            const b = art.badge;
+            const touches = x < b.x + b.img.width && x + img.width > b.x && y < b.y + b.img.height && y + img.height > b.y;
+            if (touches) y = b.y < layout.height / 2 ? b.y + b.img.height + Math.round(gap / 2) : b.y - img.height - Math.round(gap / 2);
+          }
+          if (img && y !== undefined) overlay(dst, img, x, y, alpha);
         }
+        if (art.badge) overlay(dst, art.badge.img, art.badge.x, art.badge.y, art.badge.alpha);
         last = { key, img: dst };
         return dst;
       };
@@ -507,21 +531,39 @@ export function namedChapters(names: ReadonlyArray<{ index: number; name: string
   return starts.map((c, k) => ({ start: c.t, end: starts[k + 1]?.t ?? endMs, text: c.text }));
 }
 
-interface Art { base: Map<string, Image> | null; captions: Map<string, Image>; title?: Image; end?: Image }
+interface Art { base: Map<string, Image> | null; captions: Map<string, Image>; title?: Image; end?: Image; badge?: { img: Image; x: number; y: number; alpha: number } }
+
+/** Where a badge w×h sits in a picture W×H: in its corner, a margin of 2.5% of the shorter side from the edges. */
+export function badgeAt(W: number, H: number, w: number, h: number, at: Corner = 'bottom-right'): { x: number; y: number } {
+  const m = Math.round(Math.min(W, H) * 0.025);
+  return { x: at.endsWith('left') ? m : W - w - m, y: at.startsWith('top') ? m : H - h - m };
+}
 
 /** Everything Chromium draws for one output size, made before the frames. */
-async function artFor(layers: Layers | null, layout: Layout, o: { frameStyle: FrameStyle; background: string; cues: readonly Cue[]; urls: string[]; titles: Record<string, string>; cards?: FinishOptions['cards'] }): Promise<Art> {
+async function artFor(layers: Layers | null, layout: Layout, o: { frameStyle: FrameStyle; background: string; cues: readonly Cue[]; urls: string[]; titles: Record<string, string>; cards?: FinishOptions['cards']; mark?: Watermark }): Promise<Art> {
   const art: Art = { base: null, captions: new Map() };
   if (!layers) return art;
-  if (o.frameStyle !== 'none') {
+  if (o.frameStyle !== 'none' || layout.canvas) {
     art.base = new Map();
     for (const url of o.urls.length ? o.urls : ['/']) art.base.set(url, await layers.base(layout, { background: o.background, path: url, title: o.titles[url] }));
   }
-  const fontPx = Math.max(12, Math.round(layout.content.w * 0.026));
+  // On a canvas, captions are sized to the canvas (they sit beside the app, read on a phone), not to the app.
+  const fontPx = layout.canvas ? Math.max(12, Math.round(layout.width * 0.034)) : Math.max(12, Math.round(layout.content.w * 0.026));
+  const maxWidth = Math.round(layout.canvas ? layout.width * 0.9 : layout.content.w * 0.8);
   for (const c of o.cues) {
-    if (!art.captions.has(c.text)) art.captions.set(c.text, await layers.caption(c.text, { maxWidth: Math.round(layout.content.w * 0.8), fontPx }));
+    if (!art.captions.has(c.text)) art.captions.set(c.text, await layers.caption(c.text, { maxWidth, fontPx }));
   }
   if (o.cards?.title) art.title = await layers.card(layout, { ...o.cards.title, background: o.background });
   if (o.cards?.end) art.end = await layers.card(layout, { ...o.cards.end, background: o.background });
+  if (o.mark) {
+    const img = await layers.badge(o.mark.text, { fontPx: Math.max(11, Math.round(Math.min(layout.width, layout.height) * 0.024)), ...(o.mark.logo ? { logo: o.mark.logo } : {}) });
+    const { x, y } = badgeAt(layout.width, layout.height, img.width, img.height, o.mark.at);
+    art.badge = { img, x, y, alpha: o.mark.opacity ?? 0.9 };
+    // The cards carry it too (drawn once, on copies).
+    for (const k of ['title', 'end'] as const) {
+      const c = art[k];
+      if (c) { const d = copy(c); overlay(d, img, x, y, art.badge.alpha); art[k] = d; }
+    }
+  }
   return art;
 }

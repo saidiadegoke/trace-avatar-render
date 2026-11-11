@@ -14,6 +14,8 @@ import { voiceOf } from './voice';
 import { parseArgs } from 'node:util';
 import { RenderError } from './capture';
 import { render } from './render';
+import { brandFile, canvasOf, CORNERS, watermarkOf } from './brand';
+import type { Corner, Watermark } from './brand';
 
 export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out <file.gif|file.mp4> [options]
 
@@ -51,6 +53,12 @@ export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out
   --poster [file]         a PNG at the first click (default <out>.png)
   --title-card [title]    a 1.5 s card first (default: the trace's title)
   --end-card [title]      a 2 s card last (default: "Done")
+  --canvas <shape>        compose onto 9:16 (1080x1920), 4:5, 1:1, 16:9 or WxH: the app between safe margins on the
+                          background, for Reels, Stories and feeds (--width scales the whole canvas)
+  --watermark <text>      a small badge on every frame, cards too, e.g. "Created with TraceAvatar · traceavatar.com"
+  --watermark-at <corner> top-left, top-right, bottom-left or bottom-right (default)
+  --brand <file.json>     the look in one file: canvas, watermark, frame, background, camera, captions, captionsAt,
+                          titleCard, endCard ({ title, url, logo, color }); flags given here win over it
 
   AI (nothing calls a model without --ai):
   --ai <provider>         gateway: our AI gateway (AI_GATEWAY_URL, AI_GATEWAY_KEY), DeepSeek first, then Gemini,
@@ -115,6 +123,7 @@ export function parse(argv: string[]): Parsed {
       captions: { type: 'string' }, 'captions-at': { type: 'string' }, ai: { type: 'string' }, 'ai-vision': { type: 'string' }, alt: { type: 'boolean' },
       voice: { type: 'string' }, script: { type: 'string' }, 'voice-out': { type: 'string' }, 'voice-strict': { type: 'boolean' }, 'no-voice-cache': { type: 'boolean' },
       repair: { type: 'boolean' }, 'repair-vision': { type: 'boolean' }, report: { type: 'string' },
+      canvas: { type: 'string' }, watermark: { type: 'string' }, 'watermark-at': { type: 'string' }, brand: { type: 'string' },
     },
   });
   if (values.help) throw new UsageError('');
@@ -162,12 +171,24 @@ export function parse(argv: string[]): Parsed {
     typed[v.slice(0, k)] = v.slice(k + 1);
   }
   if ((security !== undefined || values.value?.length) && mode !== 'perform') throw new UsageError('--security and --value are for --mode perform');
+  const tryUsage = <T>(f: () => T): T => { try { return f(); } catch (e) { throw new UsageError((e as Error).message); } };
+  if (values.canvas !== undefined) tryUsage(() => canvasOf(values.canvas!));
+  const at = values['watermark-at'];
+  if (at !== undefined && !CORNERS.includes(at as Corner)) throw new UsageError(`--watermark-at is ${CORNERS.join(', ')}`);
+  const brand = values.brand !== undefined ? tryUsage(() => brandFile(values.brand!)) : {};
+  let watermark: string | Watermark | undefined = values.watermark !== undefined ? tryUsage(() => watermarkOf(values.watermark!)) : brand.watermark;
+  if (at !== undefined) {
+    if (watermark === undefined) throw new UsageError('--watermark-at needs a watermark (--watermark, or one in --brand)');
+    watermark = { ...(typeof watermark === 'string' ? { text: watermark } : watermark), at: at as Corner };
+  }
   const width = num('width', values.width, 16);
   const fps = num('fps', values.fps, 1);
   const maxWait = num('max-wait', values['max-wait']);
   return {
     trace,
     options: {
+      // The brand first: the flags below win over it.
+      ...brand,
       trace,
       url: values.url,
       mode,
@@ -195,6 +216,8 @@ export function parse(argv: string[]): Parsed {
       ...(extra.poster !== undefined ? { poster: extra.poster } : {}),
       ...(extra.title !== undefined ? { titleCard: extra.title } : {}),
       ...(extra.end !== undefined ? { endCard: extra.end } : {}),
+      ...(values.canvas !== undefined ? { canvas: values.canvas } : {}),
+      ...(watermark !== undefined ? { watermark } : {}),
       ...(extra.qa !== undefined ? { qa: true } : {}),
       ...(values.alt ? { alt: true } : {}),
       ...(values.script ? { script: values.script } : {}),

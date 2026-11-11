@@ -64,10 +64,30 @@ Because the guide is known before it plays, the render can do what a screen reco
 | `--poster [file]` | a PNG at the first click (default `<out>.png`) |
 | `--title-card [title]` | 1.5 s first: the trace's title and the avatar, or your title; fades into the guide |
 | `--end-card [title]` | 2 s last: "Done", or your text (e.g. a URL) |
+| `--canvas <shape>` | compose onto `9:16` (1080×1920), `4:5`, `1:1`, `16:9` or `WxH`: the app between safe margins on the background, captions sized to the canvas and below the app; `--width` scales the canvas. For a phone-shaped clip, capture at `--viewport 390x844 --scale 2` |
+| `--watermark <text>` | a small badge on every frame, cards included (never zoomed by the camera; captions keep clear of it) |
+| `--watermark-at <corner>` | `top-left`, `top-right`, `bottom-left` or `bottom-right` (default) |
+| `--brand <file.json>` | the look in one file (below); flags given on the command line win over it |
 
 ```sh
 trace-avatar-render invoice.trace.json --url http://localhost:3000/app --out invoice.mp4 \
   --scale 2 --frame browser --camera --captions both --poster --title-card --end-card "acme.com/invoices"
+```
+
+**A brand** keeps every clip of a product looking the same, in every shape:
+
+```json
+{
+  "frame": "browser",
+  "background": "linear-gradient(135deg, #e6eefc, #e9f6f1)",
+  "watermark": { "text": "Made by Acme", "at": "bottom-right", "logo": "acme-mark.svg" },
+  "endCard": { "title": "For more info visit", "url": "acme.com", "logo": "acme-logo.png", "color": "#2456d8" }
+}
+```
+
+```sh
+trace-avatar-render invoice.trace.json --url http://localhost:3000/app --brand acme.json --canvas 9:16 \
+  --viewport 390x844 --scale 2 --captions burn --out invoice-reel.mp4
 ```
 
 Exit codes: 0 rendered, 1 the render failed, 2 wrong usage.

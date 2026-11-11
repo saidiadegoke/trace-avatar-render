@@ -5,7 +5,9 @@
  *   await render({ trace: './invoice.trace.json', url: 'http://localhost:3000/app', out: ['invoice.gif'] });
  */
 
-export { render, finish, formatOf, cardOf } from './render';
+export { render, finish, formatOf, cardOf, badgeAt } from './render';
+export { brandOf, brandFile, canvasOf, watermarkOf, CANVASES, CORNERS } from './brand';
+export type { Brand, Canvas, CanvasSpec, Corner, Watermark } from './brand';
 export type { FinishOptions, OutFormat, OutSpec, RenderOptions, RenderOutput, RenderResult } from './render';
 export { capture, findPlayer, RenderError } from './capture';
 export type { Capture, CaptureOptions, CapturedFrame } from './capture';
@@ -21,7 +23,7 @@ export type { Action, CameraOptions, Rect } from './camera';
 export { layoutOf } from './layout';
 export type { FrameStyle, Layout } from './layout';
 export { drawRegion, overlay, crossfade, blank } from './compose';
-export { createLayers, DEFAULT_BACKGROUND } from './layers';
+export { createLayers, dataUri, DEFAULT_BACKGROUND } from './layers';
 export type { CardOptions, Layers } from './layers';
 export { actionsOf, stepCues, pageAt, cueAt } from './plan';
 export { toVtt, captionCues, chapterCues } from './vtt';

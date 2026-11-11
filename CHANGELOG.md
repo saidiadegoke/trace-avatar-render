@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.4 (unreleased)
+
+- `--canvas 9:16|4:5|1:1|16:9|WxH` (`canvas` in `render()` and `finish()`): the app is composed onto a picture of that
+  shape, between safe margins on the background, for Reels, Stories and feeds.
+  - `--width` scales the whole canvas.
+  - A phone capture is scaled up to fill a tall canvas, so capture it at `--scale 2`.
+  - Burned-in captions are sized to the canvas and sit below the app (above it with `--captions-at top`).
+- `--watermark <text>` and `--watermark-at <corner>` (`watermark: text | { text, at, opacity, logo }`): a small
+  badge on every frame, the title and end cards included.
+  - It is drawn after the camera, so it never zooms.
+  - A burned-in caption that would touch it moves clear of it.
+- **Cards** take `url` (large, in the card's colour) and `logo` (an image file above the title), e.g.
+  `{ "title": "For more info visit", "url": "naijaprices.com" }`.
+- `--brand <file.json>` (`brandOf`, `brandFile`): the look in one checked file.
+  - It covers canvas, watermark, frame, background, camera, captions, captionsAt, titleCard and endCard.
+  - Logo paths resolve beside the file.
+  - Flags given on the command line win over it.
+
 ## 0.1.3 (11 Nov 2026)
 
 - `--captions-at top|bottom` (`captionsAt` in `render()` and `finish()`): burned-in captions can sit at the top. At
