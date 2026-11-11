@@ -31,7 +31,7 @@ Because the guide is known before it plays, the render can do what a screen reco
 | | |
 |---|---|
 | `--url <url>` | the page the guide starts on (required) |
-| `--out <file>` | `.gif` or `.mp4`, repeatable (required) |
+| `--out <file>` | `.gif` or `.mp4`, repeatable (required); `<file>@<shape>` gives that output its own canvas (see `--canvas`), so one capture makes several shapes |
 | `--mode overlay\|perform` | Show me (default) or Do it for me |
 | `--allow-perform` | needed for Do it for me: it clicks and types in the app for real. **Use a sandbox account.** |
 | `--width <px>` | output width (GIF default 800, MP4 the capture's) |
@@ -88,6 +88,13 @@ trace-avatar-render invoice.trace.json --url http://localhost:3000/app --out inv
 ```sh
 trace-avatar-render invoice.trace.json --url http://localhost:3000/app --brand acme.json --canvas 9:16 \
   --viewport 390x844 --scale 2 --captions burn --out invoice-reel.mp4
+```
+
+One capture, several feed shapes:
+
+```sh
+trace-avatar-render invoice.trace.json --url http://localhost:3000/app --brand acme.json --scale 2 \
+  --out invoice-wide.mp4@16:9 --out invoice-square.mp4@1:1 --out invoice-feed.mp4@4:5
 ```
 
 Exit codes: 0 rendered, 1 the render failed, 2 wrong usage.

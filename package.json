@@ -1,6 +1,6 @@
 {
   "name": "trace-avatar-render",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Render a trace-avatar guide to a GIF or MP4 by playing it on your real app in headless Chromium.",
   "type": "module",
   "bin": {

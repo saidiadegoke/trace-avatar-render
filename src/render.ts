@@ -51,6 +51,8 @@ export interface OutSpec {
   width?: number;
   /** Default: GIF 12, MP4 30. */
   fps?: number;
+  /** This output's own canvas (over the render's `canvas`): several shapes from one capture. */
+  canvas?: CanvasSpec;
 }
 
 export interface RenderOptions {
@@ -329,6 +331,8 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
 
   const frameStyle = o.frame ?? 'none';
   const canvas = o.canvas !== undefined ? canvasOf(o.canvas) : undefined;
+  // Each output may name its own canvas: checked before anything is drawn.
+  const canvases = outs.map((x) => (x.canvas !== undefined ? canvasOf(x.canvas) : canvas));
   const mark = o.watermark !== undefined ? watermarkOf(o.watermark) : undefined;
   const background = o.background ?? DEFAULT_BACKGROUND;
   const burn = o.captions === 'burn' || o.captions === 'both';
@@ -347,7 +351,7 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
   const titleMs = o.cards?.title ? TITLE_MS : 0;
   const endMs = o.cards?.end ? END_MS : 0;
   const full: Rect = { x: 0, y: 0, w: srcW, h: srcH };
-  const needLayers = frameStyle !== 'none' || !!canvas || !!mark || (burn && (cues.length > 0 || plain.cues.length > 0)) || !!o.cards?.title || !!o.cards?.end;
+  const needLayers = frameStyle !== 'none' || canvases.some(Boolean) || !!mark || (burn && (cues.length > 0 || plain.cues.length > 0)) || !!o.cards?.title || !!o.cards?.end;
 
   const browser = needLayers ? await chromium.launch() : null;
   let layers: Layers | null = null;
@@ -361,7 +365,7 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
     for (const [n, out] of outs.entries()) {
       mkdirSync(dirname(out.file) || '.', { recursive: true });
       const fps = out.fps ?? (out.format === 'gif' ? 12 : 30);
-      const layout = layoutOf(srcW, srcH, out.width ?? (out.format === 'gif' ? 800 : undefined), frameStyle, canvas);
+      const layout = layoutOf(srcW, srcH, out.width ?? (out.format === 'gif' ? 800 : undefined), frameStyle, canvases[n]);
       // A GIF has no sound, so it keeps the timing without holds.
       const v = out.format === 'gif' ? plain : main;
       const { cam, segs, contentMs } = v;

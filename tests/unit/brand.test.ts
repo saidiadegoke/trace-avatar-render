@@ -85,6 +85,10 @@ describe('canvas, watermark and brand', () => {
     const p = parse([...base, '--brand', file, '--canvas', '1:1', '--watermark-at', 'top-right']).options;
     expect(p).toMatchObject({ canvas: '1:1', frame: 'browser', watermark: { text: 'From the brand', at: 'top-right' }, endCard: { title: 'For more info visit', url: 'naijaprices.com' } });
     expect(() => parse([...base, '--brand', join(dir, 'none.json')])).toThrow(/brand/);
+    // An output's own canvas: file@shape.
+    const many = parse(['a.trace.json', '--url', 'u', '--out', 'wide.mp4@16:9', '--out', 'sq.mp4@1:1', '--out', 'plain.gif', '--voice', 'say']).options;
+    expect(many.out).toEqual([{ file: 'wide.mp4', canvas: '16:9' }, { file: 'sq.mp4', canvas: '1:1' }, { file: 'plain.gif' }]);
+    expect(() => parse(['a.trace.json', '--url', 'u', '--out', 'x.mp4@tall'])).toThrow(/a canvas is/);
   });
 });
 
@@ -131,6 +135,17 @@ describe('finish with a canvas and a watermark', () => {
     await finish(cap(), [{ file: plain, format: 'gif', fps: 10, width: 360 }], { canvas: '9:16', background: '#f0f0f0', cuts: { maxWaitMs: 0 } });
     const p = framesOf(plain);
     expect(dark(p.out[p.out.length - 1], p.g.width, p.g.width - 120, p.g.height - 40, p.g.width - 10, p.g.height - 10)).toBe(0);
+  }, 60_000);
+
+  it('several shapes from one capture: each output its own canvas, the render\'s canvas for the rest', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tar-'));
+    const r = await finish(cap(), [
+      { file: join(dir, 'a.gif'), format: 'gif', fps: 5, width: 300, canvas: '1:1' },
+      { file: join(dir, 'b.gif'), format: 'gif', fps: 5, width: 300, canvas: '4:5' },
+      { file: join(dir, 'c.gif'), format: 'gif', fps: 5, width: 300 },
+    ], { canvas: '9:16', background: '#f0f0f0', cuts: { maxWaitMs: 0 } });
+    expect(r.outputs.map((x) => [x.width, x.height])).toEqual([[300, 300], [300, 376], [300, 534]]);
+    await expect(finish(cap(), [{ file: join(dir, 'd.gif'), format: 'gif', canvas: 'tall' }], {})).rejects.toThrow(/a canvas is/);
   }, 60_000);
 
   it('a watermark without a canvas sits on the app itself, in the corner it is given', async () => {

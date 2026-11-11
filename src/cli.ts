@@ -20,7 +20,8 @@ import type { Corner, Watermark } from './brand';
 export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out <file.gif|file.mp4> [options]
 
   --url <url>             the page the guide starts on (required)
-  --out <file>            .gif or .mp4; repeat for several (required)
+  --out <file>            .gif or .mp4; repeat for several (required). <file>@<shape> gives that output its own
+                          canvas (e.g. --out wide.mp4@16:9 --out square.mp4@1:1): several shapes from one capture
   --mode <overlay|perform> Show me (default) or Do it for me
   --allow-perform         needed for perform: it clicks and types for real (use a sandbox account)
   --width <px>            output width (GIF default 800, MP4 the capture's)
@@ -156,7 +157,7 @@ export function parse(argv: string[]): Parsed {
   if ((extra.qa !== undefined || values.alt || values['ai-vision']) && !values.ai) throw new UsageError('--qa, --alt and --ai-vision need --ai');
   if (values['repair-vision'] && !(values.repair && values.ai)) throw new UsageError('--repair-vision needs --repair and --ai');
   if ((values.script || values['voice-out'] || values['voice-strict'] || values['no-voice-cache']) && !values.voice) throw new UsageError('--script, --voice-out, --voice-strict and --no-voice-cache need --voice');
-  if (values.voice && !values.out.some((f) => /\.mp4$/i.test(f))) throw new UsageError('--voice needs an .mp4 output (a GIF has no sound)');
+  if (values.voice && !values.out.some((f) => /\.mp4(@.*)?$/i.test(f))) throw new UsageError('--voice needs an .mp4 output (a GIF has no sound)');
   let security: boolean | string[] | undefined;
   if (values.security !== undefined) {
     const s = values.security.trim().toLowerCase();
@@ -173,6 +174,7 @@ export function parse(argv: string[]): Parsed {
   if ((security !== undefined || values.value?.length) && mode !== 'perform') throw new UsageError('--security and --value are for --mode perform');
   const tryUsage = <T>(f: () => T): T => { try { return f(); } catch (e) { throw new UsageError((e as Error).message); } };
   if (values.canvas !== undefined) tryUsage(() => canvasOf(values.canvas!));
+  for (const o of values.out ?? []) { const m = /^.+\.(?:gif|mp4)@(.+)$/i.exec(o); if (m) tryUsage(() => canvasOf(m[1])); }
   const at = values['watermark-at'];
   if (at !== undefined && !CORNERS.includes(at as Corner)) throw new UsageError(`--watermark-at is ${CORNERS.join(', ')}`);
   const brand = values.brand !== undefined ? tryUsage(() => brandFile(values.brand!)) : {};
@@ -193,7 +195,11 @@ export function parse(argv: string[]): Parsed {
       url: values.url,
       mode,
       allowPerform: !!values['allow-perform'],
-      out: values.out.map((file) => ({ file, ...(width ? { width } : {}), ...(fps ? { fps } : {}) })),
+      out: values.out.map((spec) => {
+        const m = /^(.+\.(?:gif|mp4))@(.+)$/i.exec(spec);
+        const file = m ? m[1] : spec;
+        return { file, ...(width ? { width } : {}), ...(fps ? { fps } : {}), ...(m ? { canvas: m[2] } : {}) };
+      }),
       ...(viewport ? { viewport } : {}),
       ...(values.scale ? { scale: num('scale', values.scale, 1) } : {}),
       ...(values['storage-state'] ? { storageState: values['storage-state'] } : {}),

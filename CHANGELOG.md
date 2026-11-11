@@ -1,6 +1,13 @@
 # Changelog
 
-## 0.1.4 (unreleased)
+## 0.1.5 (unreleased)
+
+- **Several shapes from one capture**: `--out file.mp4@1:1` (`OutSpec.canvas` in `render()` and `finish()`) gives
+  that output its own canvas, over `--canvas`. A 16:9, a 1:1 and a 4:5 cut of one run need one capture, not three
+  (found making SpeedyMessaging's campaign videos: three captures took three times as long, and a Do it for me run
+  sent three test messages).
+
+## 0.1.4 (11 Nov 2026)
 
 - `--canvas 9:16|4:5|1:1|16:9|WxH` (`canvas` in `render()` and `finish()`): the app is composed onto a picture of that
   shape, between safe margins on the background, for Reels, Stories and feeds.
