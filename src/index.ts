@@ -37,3 +37,5 @@ export type { NarrationPlan, PlannedLine, PlanOptions, Script } from './narratio
 export { providerOf, runQa } from './ai';
 export { repairGuide, stallInspector, repairScriptOf } from './repair';
 export type { RepairOutcome, RepairSuggestion, Unresolved } from './repair';
+export { checkCatalogue, catalogueId, vttEnds, mp4Head, CATALOGUE_SPEC, CATALOGUE_KINDS, CATALOGUE_SHAPES, CATALOGUE_FORMATS, CATALOGUE_REQUIRED } from './catalogue';
+export type { Catalogue, CatalogueEntry, CatalogueCheck, CheckOptions } from './catalogue';

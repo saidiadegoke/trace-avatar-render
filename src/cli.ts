@@ -15,6 +15,7 @@ import { parseArgs } from 'node:util';
 import { RenderError } from './capture';
 import { render } from './render';
 import { brandFile, canvasOf, CORNERS, watermarkOf } from './brand';
+import { checkCatalogue } from './catalogue';
 import type { Corner, Watermark } from './brand';
 
 export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out <file.gif|file.mp4> [options]
@@ -87,6 +88,11 @@ Suggestions for a person to accept (the renderer never changes a trace):
   trace-avatar-render suggest <trace.json> --task captions|title|waits|narration --ai <provider> [--tone friendly|terse|formal]
                           [--hints hints.json] [--out suggestions.json]
   trace-avatar-render apply <trace.json> <suggestions.json> --accept 1,3|all --out <new.trace.json>
+
+A clip catalogue (trace-avatar-catalogue/1, schemas/catalogue-1.json):
+  trace-avatar-render catalogue check <file.json|https://…> [--fetch] [--json]
+                          --fetch: fetch every link too (reachable, its type, captions within the video, mp4 head)
+                          --allow-http: accept http:// links (a local test server)
 `;
 
 export interface Parsed { /** --report */ report?: string; trace: string; options: Parameters<typeof render>[0]; /** --ai, made into a provider by main(). */ ai?: string; /** --ai-vision */ aiVision?: string; /** --voice, made into a Voice by main() */ voice?: string; /** --no-voice-cache */ noVoiceCache?: boolean; /** --qa strict */ strict?: boolean }
@@ -271,8 +277,8 @@ export function reportOf(err: unknown, traceFile: string, repairFile?: string): 
 export class UsageError extends Error {}
 
 export async function main(argv: string[], io = { log: console.log, error: console.error }): Promise<number> {
-  if (argv[0] === 'suggest' || argv[0] === 'apply') {
-    try { return await (argv[0] === 'suggest' ? suggestCmd(argv.slice(1), io) : applyCmd(argv.slice(1), io)); } catch (e) {
+  if (argv[0] === 'suggest' || argv[0] === 'apply' || argv[0] === 'catalogue') {
+    try { return await (argv[0] === 'suggest' ? suggestCmd(argv.slice(1), io) : argv[0] === 'apply' ? applyCmd(argv.slice(1), io) : catalogueCmd(argv.slice(1), io)); } catch (e) {
       io.error(`trace-avatar-render ${argv[0]}: ${(e as Error).message}`);
       if (e instanceof UsageError) io.error(USAGE);
       return e instanceof UsageError ? 2 : 1;
@@ -367,6 +373,28 @@ async function applyCmd(argv: string[], io: { log: (m: string) => void }): Promi
   writeFileSync(values.out, `${JSON.stringify(next, null, 2)}\n`);
   io.log(`applied ${ids.length} of ${all.length} to ${values.out}`);
   return 0;
+}
+
+/** catalogue check <file|url> [--fetch] [--json]: 0 it keeps the spec, 1 it doesn't. */
+async function catalogueCmd(argv: string[], io: { log: (m: string) => void; error: (m: string) => void }): Promise<number> {
+  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { fetch: { type: 'boolean' }, json: { type: 'boolean' }, 'allow-http': { type: 'boolean' } } });
+  const [sub, where] = positionals;
+  if (sub !== 'check' || !where) throw new UsageError('catalogue check needs a file or a link');
+  let doc: unknown;
+  if (/^https?:\/\//.test(where)) {
+    const res = await fetch(where);
+    if (!res.ok) throw new Error(`${where} answered ${res.status}`);
+    doc = await res.json();
+  } else {
+    if (!existsSync(where)) throw new UsageError(`no file ${where}`);
+    doc = readJson(where);
+  }
+  const r = await checkCatalogue(doc, { fetch: !!values.fetch, allowHttp: !!values['allow-http'] });
+  if (values.json) { io.log(JSON.stringify(r, null, 2)); return r.ok ? 0 : 1; }
+  for (const p of r.problems) io.error(`✗ ${p}`);
+  for (const w of r.warnings) io.log(`warning: ${w}`);
+  io.log(`${where}: ${r.videos} video${r.videos === 1 ? '' : 's'}${values.fetch ? `, ${r.fetched} link${r.fetched === 1 ? '' : 's'} fetched` : ''} — ${r.ok ? 'keeps trace-avatar-catalogue/1' : `${r.problems.length} problem${r.problems.length === 1 ? '' : 's'}`}${r.warnings.length ? `, ${r.warnings.length} warning${r.warnings.length === 1 ? '' : 's'}` : ''}`);
+  return r.ok ? 0 : 1;
 }
 
 const isMain = import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('/trace-avatar-render') || process.argv[1]?.endsWith('/cli.js');

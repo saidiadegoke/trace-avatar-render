@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://traceavatar.com/schemas/catalogue-1.json",
+  "title": "trace-avatar-catalogue/1",
+  "description": "A product's published marketing videos: one entry per file and shape. `trace-avatar-render catalogue check` checks this and the rules a schema can't (unique ids, captions that fit the video, links that answer).",
+  "type": "object",
+  "required": ["spec", "updated", "videos"],
+  "properties": {
+    "spec": { "const": "trace-avatar-catalogue/1" },
+    "updated": { "type": "string", "format": "date-time" },
+    "videos": { "type": "array", "items": { "$ref": "#/$defs/entry" } }
+  },
+  "$defs": {
+    "word": { "type": "string", "pattern": "^\\S+$" },
+    "https": { "type": "string", "format": "uri", "pattern": "^https://" },
+    "entry": {
+      "type": "object",
+      "required": ["id", "product", "video", "kind", "preset", "shape", "format", "url", "captionsBurned", "seconds", "narrated", "alt", "site", "made"],
+      "properties": {
+        "id": { "$ref": "#/$defs/word", "description": "Stable across re-renders: <product>/<video>/<preset>/<shape|gif>." },
+        "product": { "$ref": "#/$defs/word", "description": "The product it promotes." },
+        "video": { "$ref": "#/$defs/word", "description": "The video it is a cut of; its shapes share it." },
+        "kind": { "enum": ["intro", "demo", "guide", "onboarding", "pitch", "whats-new", "ad", "docs-gif", "qa", "support"] },
+        "preset": { "$ref": "#/$defs/word", "description": "The look: product (its own brand) or another." },
+        "shape": { "enum": ["16:9", "1:1", "4:5", "9:16", null], "description": "The canvas; null for a GIF." },
+        "format": { "enum": ["mp4", "gif"] },
+        "url": { "$ref": "#/$defs/https", "description": "The file. Content-addressed and cached forever is recommended." },
+        "poster": { "$ref": "#/$defs/https" },
+        "captions": { "$ref": "#/$defs/https", "description": "WebVTT, when the captions are not burned in." },
+        "language": { "type": "string", "pattern": "^[a-z]{2}$", "description": "The captions' and narration's language; en when absent." },
+        "captionsBurned": { "type": "boolean" },
+        "seconds": { "type": "number", "exclusiveMinimum": 0 },
+        "narrated": { "type": "boolean" },
+        "title": { "type": ["string", "null"] },
+        "alt": { "type": "string", "minLength": 1, "description": "What it shows, plainly." },
+        "says": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "The video's own words, in order: its captions (the spoken lines when narrated) and its cards' lines." },
+        "site": { "$ref": "#/$defs/https" },
+        "endsWith": { "type": "string", "description": "What its last card says." },
+        "made": { "type": "string", "format": "date-time" }
+      },
+      "allOf": [
+        { "if": { "properties": { "format": { "const": "gif" } } }, "then": { "properties": { "shape": { "const": null } } } },
+        { "if": { "properties": { "format": { "const": "mp4" } } }, "then": { "properties": { "shape": { "enum": ["16:9", "1:1", "4:5", "9:16"] } } } },
+        { "if": { "properties": { "captionsBurned": { "const": true } }, "required": ["captionsBurned"] }, "then": { "not": { "required": ["captions"] } } }
+      ]
+    }
+  }
+}

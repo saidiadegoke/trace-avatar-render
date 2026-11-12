@@ -155,6 +155,39 @@ frames move with the holds. GIFs from the same render keep the original timing. 
 `<out>.narration.txt`. `suggest --task narration` drafts spoken lines from the steps (nothing typed is sent) for a
 person to edit and pass with `--script`.
 
+## A clip catalogue
+
+Published videos are listed in a **clip catalogue**: a public JSON file (`trace-avatar-catalogue/1`, schema in
+[`schemas/catalogue-1.json`](schemas/catalogue-1.json), also at https://traceavatar.com/schemas/catalogue-1.json).
+It has one entry per file and shape, each with its link, length, captions, description (`alt`) and its own words in
+order (`says`), so a scheduler can pick a clip and write a post that matches it.
+
+```json
+{ "spec": "trace-avatar-catalogue/1", "updated": "2026-11-12T22:54:29Z", "videos": [{
+  "id": "acme/ad-paid/product/1:1", "product": "acme", "video": "ad-paid", "kind": "ad", "preset": "product",
+  "shape": "1:1", "format": "mp4", "url": "https://cdn.acme.com/ad-paid-1x1-0123456789.mp4",
+  "poster": "https://cdn.acme.com/ad-paid-1x1-aaaaaaaaaa.png", "captions": "https://cdn.acme.com/ad-paid-1x1-bbbbbbbbbb.vtt",
+  "language": "en", "captionsBurned": false, "seconds": 12.5, "narrated": true, "title": null,
+  "alt": "Acme ad: an invoice marked paid the moment the transfer lands.",
+  "says": ["Get paid the day you send it.", "Marked paid when the transfer lands."],
+  "site": "https://acme.com", "endsWith": "For more info visit acme.com", "made": "2026-11-12T21:54:32Z" }] }
+```
+
+- `id` stays the same when a clip is re-rendered (`<product>/<video>/<preset>/<shape|gif>`); `url` changes. Name files
+  by their content and cache them forever; cache the catalogue itself briefly.
+- `captions` is WebVTT, present only when the words aren't burned in (`captionsBurned`).
+- `says` is what the viewer reads or hears: the captions (the spoken lines when narrated) and the cards' lines.
+- Unknown fields are allowed.
+
+```bash
+trace-avatar-render catalogue check catalogue.json            # every field, unique ids
+trace-avatar-render catalogue check https://…/catalogue.json --fetch
+#   …and every link: answers without cookies with the right type; captions end within the video;
+#   the mp4 is H.264 (AAC when narrated) with its moov first (-movflags +faststart)
+```
+
+`checkCatalogue(doc, { fetch })` does the same from code (`{ ok, problems, warnings }`).
+
 ## From code
 
 ```js

@@ -1,6 +1,17 @@
 # Changelog
 
-## 0.1.6 (unreleased)
+## 0.1.7 (unreleased)
+
+- **The clip catalogue, `trace-avatar-catalogue/1`** (`schemas/catalogue-1.json`, also at
+  https://traceavatar.com/schemas/catalogue-1.json): a public JSON file of a product's published videos, one entry per
+  file and shape, with each clip's own words (`says`), so a scheduler can post it and write about it truthfully.
+  - `trace-avatar-render catalogue check <file|url> [--fetch]` checks one: every field, unique ids, burned captions
+    with no captions file. With `--fetch` it checks the links too: they answer without cookies, with the right type;
+    the captions end within the video; the mp4 is H.264 (with AAC sound when narrated) and starts playing before it
+    has all loaded (`moov` first).
+  - `checkCatalogue()`, `catalogueId()`, `vttEnds()`, `mp4Head()` in the library.
+
+## 0.1.6 (12 Nov 2026)
 
 - **Cards between scenes** (`Capture.cards` in `finish()`; `withCards`, `cardFrames`): a card shown for its time at a
   moment of the capture, in the title and end cards' look, fading in and out. A narrated card lasts as long as its
