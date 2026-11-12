@@ -176,6 +176,12 @@ r.offsetMs + outputAt(r.segments, t);       // where a moment of the capture lan
 
 `render` rejects with a `RenderError` (with `.screenshot`) when the guide stalls, errors, or can't start.
 
+`finish(capture, outputs, options)` makes the video from a capture you made yourself (a Playwright script of your
+own, say). A capture can carry **cards between scenes**: `capture.cards = [{ t, ms, card: { title, url, logo, color },
+step }]` shows each card for `ms` at source time `t`, fading in from the app and out to it. With narration, a card
+whose `step` has a line lasts as long as that line (and 0.7 s more); put that step's event at `t + 1`, so the line
+is spoken over the card. A card says its own words, so it gets no burned-in caption.
+
 ## How it works
 
 ```

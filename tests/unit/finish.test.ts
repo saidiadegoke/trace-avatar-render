@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -114,5 +114,78 @@ describe('finish: from a capture to a GIF', () => {
     const high = await darkRows('top');
     expect(high.top).toBeGreaterThan(500);
     expect(high.bottom).toBe(0);
+  }, 30_000);
+
+  it('a card between scenes: shown for its time at its moment, the app before and after; a narrated card lasts as long as its line', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tar-'));
+    const white = () => { const p = new PNG({ width: 160, height: 100 }); p.data.fill(255); return PNG.sync.write(p); };
+    const t0 = 3_000_000;
+    const cap: Capture = {
+      frames: Array.from({ length: 31 }, (_, k) => ({ t: t0 + k * 100, png: white() })),
+      events: [{ t: t0, type: 'play' }, { t: t0 + 1001, type: 'step', index: 0, stepType: 'card', say: 'Posting takes hours.' }, { t: t0 + 3000, type: 'end' }],
+      playAt: t0, stopAt: t0 + 3000, endAt: t0 + 3000,
+      cards: [{ t: t0 + 1000, ms: 1000, card: { title: 'Posting takes hours.' }, step: 0 }],
+    };
+    const file = join(dir, 'card.gif');
+    const r = await finish(cap, [{ file, format: 'gif', fps: 10 }], { cuts: { maxWaitMs: 0 }, background: '#000' });
+    expect(r.durationMs).toBe(4000);
+    expect(r.segments.find((s) => s.card === 0)).toMatchObject({ hold: 1000 });
+    const g = new omggif.GifReader(new Uint8Array(readFileSync(file)));
+    const px = new Uint8Array(g.width * g.height * 4);
+    const whiteAt = (ms: number) => {
+      for (let i = 0, t = 0; i < g.numFrames() && t <= ms; t += g.frameInfo(i).delay * 10, i += 1) g.decodeAndBlitFrameRGBA(i, px);
+      let n = 0;
+      for (let p = 0; p < g.width * g.height; p += 1) if (px[p * 4] > 240 && px[p * 4 + 1] > 240 && px[p * 4 + 2] > 240) n += 1;
+      return n / (g.width * g.height);
+    };
+    expect(whiteAt(500)).toBeGreaterThan(0.95); // the app
+    expect(whiteAt(1600)).toBeLessThan(0.5); // the card, on its dark background
+    expect(whiteAt(2700)).toBeGreaterThan(0.95); // the app again
+    // Narrated (an MP4; a stand-in ffmpeg that only takes the frames): the card is as long as its line and a little more.
+    const bin = join(dir, 'ffmpeg');
+    writeFileSync(bin, '#!/bin/sh\ncat > /dev/null\nfor a; do f="$a"; done\ncase "$f" in *.mp4) : > "$f";; esac\n');
+    chmodSync(bin, 0o755);
+    const before = process.env.FFMPEG;
+    process.env.FFMPEG = bin;
+    const pcm = new Int16Array(24_000 * 2);
+    const said = await finish(cap, [{ file: join(dir, 'said.mp4'), format: 'mp4', fps: 10 }], {
+      cuts: { maxWaitMs: 0 }, narration: { lines: new Map([[0, { text: 'Posting takes hours.', audio: { pcm, sampleRate: 24_000 } }]]) },
+    });
+    if (before === undefined) delete process.env.FFMPEG; else process.env.FFMPEG = before;
+    expect(said.segments.find((s) => s.card === 0)).toMatchObject({ hold: 2700 });
+    expect(said.durationMs).toBeGreaterThanOrEqual(3000 + 2700);
+  }, 30_000);
+
+  it('a card before the first frame (a still page sends none) still opens the video, and its line is spoken; a card at the end closes it', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'tar-'));
+    const white = () => { const p = new PNG({ width: 160, height: 100 }); p.data.fill(255); return PNG.sync.write(p); };
+    const t0 = 4_000_000;
+    const cap: Capture = {
+      // The page's first frame comes 1.5 s after play (it was still until then).
+      frames: Array.from({ length: 11 }, (_, k) => ({ t: t0 + 1500 + k * 100, png: white() })),
+      events: [
+        { t: t0, type: 'play' }, { t: t0 + 6, type: 'step', index: 0, stepType: 'card', say: 'The hook.' },
+        { t: t0 + 2400, type: 'step', index: 1, stepType: 'scene', say: 'The moment.' },
+        { t: t0 + 2506, type: 'step', index: 2, stepType: 'card', say: 'Start free at' }, { t: t0 + 3300, type: 'end' },
+      ],
+      playAt: t0, stopAt: t0 + 3300, endAt: t0 + 3300,
+      cards: [{ t: t0 + 5, ms: 1000, card: { title: 'The hook.' }, step: 0 }, { t: t0 + 2505, ms: 1000, card: { title: 'Start free at' }, step: 2 }],
+    };
+    const bin = join(dir, 'ffmpeg');
+    writeFileSync(bin, '#!/bin/sh\ncat > /dev/null\nfor a; do f="$a"; done\ncase "$f" in *.mp4) : > "$f";; esac\n');
+    chmodSync(bin, 0o755);
+    const before = process.env.FFMPEG;
+    process.env.FFMPEG = bin;
+    const line = { audio: { pcm: new Int16Array(24_000 / 2), sampleRate: 24_000 } };
+    const r = await finish(cap, [{ file: join(dir, 'hook.mp4'), format: 'mp4', fps: 10 }], {
+      cuts: { maxWaitMs: 0 },
+      narration: { lines: new Map([[0, { text: 'The hook.', ...line }], [1, { text: 'The moment.', ...line }], [2, { text: 'Start free at', ...line }]]) },
+    });
+    if (before === undefined) delete process.env.FFMPEG; else process.env.FFMPEG = before;
+    expect(r.warnings ?? []).toEqual([]);
+    expect(r.segments[0]).toMatchObject({ card: 0 });
+    // Nothing of the app after the closing card: it is the last thing (bar the moment its step needs).
+    const last = r.segments.findIndex((x) => x.card === 1);
+    expect(r.segments.slice(last + 1).reduce((n, x) => n + (x.hold ?? x.to - x.from), 0)).toBeLessThanOrEqual(1);
   }, 30_000);
 });

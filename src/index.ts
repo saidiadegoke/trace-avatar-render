@@ -11,7 +11,7 @@ export type { Brand, Canvas, CanvasSpec, Corner, Watermark } from './brand';
 export type { FinishOptions, OutFormat, OutSpec, RenderOptions, RenderOutput, RenderResult } from './render';
 export { capture, findPlayer, RenderError } from './capture';
 export type { Capture, CaptureOptions, CapturedFrame } from './capture';
-export { editList, spansOf, durationOf, sourceAt, outputAt, frameTimes, pickFrames, withHolds, DEFAULT_MAX_WAIT_MS } from './timeline';
+export { editList, spansOf, durationOf, sourceAt, outputAt, frameTimes, pickFrames, withHolds, withCards, cardFrames, DEFAULT_MAX_WAIT_MS } from './timeline';
 export type { Phase, Segment, Span, TimelineEvent, EditOptions } from './timeline';
 export { encodeGif, createGifWriter, paletteOf } from './gif';
 export type { GifOptions, GifResult, GifWriter } from './gif';

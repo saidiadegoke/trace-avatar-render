@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { durationOf, editList, frameTimes, outputAt, pickFrames, sourceAt, spansOf } from '../../src/timeline';
+import { cardFrames, durationOf, editList, frameTimes, outputAt, pickFrames, sourceAt, spansOf, withCards, withHolds } from '../../src/timeline';
 import type { TimelineEvent } from '../../src/timeline';
 
 const st = (t: number, phase: TimelineEvent['phase']): TimelineEvent => ({ t, type: 'state', phase });
@@ -49,5 +49,24 @@ describe('editList and time maps', () => {
 
   it('picks the last captured frame at or before each time', () => {
     expect(pickFrames([10, 20, 30], [0, 10, 15, 20, 29, 30, 99])).toEqual([0, 0, 0, 1, 1, 2, 2]);
+  });
+});
+
+describe('cards between scenes (withCards)', () => {
+  it('a card is a held moment at its source time; a step just after it lands at its end; one in a cut goes where the next stretch starts', () => {
+    const segs = withCards([{ from: 0, to: 1000 }, { from: 5000, to: 6000 }], [{ t: 400, ms: 2000 }, { t: 3000, ms: 500 }]);
+    expect(segs).toEqual([{ from: 0, to: 400 }, { from: 400, to: 400, hold: 2000, card: 0 }, { from: 400, to: 1000 }, { from: 5000, to: 5000, hold: 500, card: 1 }, { from: 5000, to: 6000 }]);
+    expect(durationOf(segs)).toBe(4500);
+    expect(outputAt(segs, 399)).toBe(399);
+    expect(outputAt(segs, 401)).toBe(2401);
+    expect(withCards([{ from: 0, to: 1000 }], [{ t: 9000, ms: 300 }])).toEqual([{ from: 0, to: 1000 }, { from: 1000, to: 1000, hold: 300, card: 0 }]);
+  });
+
+  it('cardFrames: which frames show a card; narration holds keep it', () => {
+    const segs = withHolds(withCards([{ from: 0, to: 1000 }], [{ t: 500, ms: 500 }]), [{ at: 200, ms: 100 }]);
+    expect(segs.find((s) => s.card === 0)).toEqual({ from: 500, to: 500, hold: 500, card: 0 });
+    const at = cardFrames(segs, 10);
+    expect(at.length).toBe(16);
+    expect(at.map((c) => (c === undefined ? '.' : String(c))).join('')).toBe('......00000.....');
   });
 });

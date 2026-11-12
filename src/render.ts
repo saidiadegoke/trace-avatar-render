@@ -27,7 +27,7 @@ import type { CanvasSpec, Corner, Watermark } from './brand';
 import type { FrameStyle, Layout } from './layout';
 import { encodeMp4, findFfmpeg } from './mp4';
 import { actionsOf, cueAt, pageAt, stepCues } from './plan';
-import { durationOf, editList, frameTimes, outputAt, pickFrames, withHolds, DEFAULT_MAX_WAIT_MS } from './timeline';
+import { cardFrames, durationOf, editList, frameTimes, outputAt, pickFrames, withCards, withHolds, DEFAULT_MAX_WAIT_MS } from './timeline';
 import { mix, msOf, toWav, trimSilence, TRACK_RATE } from './audio';
 import type { Pcm } from './audio';
 import { linesOf, narrationText, parseScript, planNarration } from './narration';
@@ -187,6 +187,10 @@ const LEAD_MS = 500;
 const TITLE_MS = 1500;
 const END_MS = 2000;
 const FADE_MS = 300;
+/** A narrated card stays this much longer than its line. */
+const CARD_PAD_MS = 700;
+/** A card this close to the end of the capture is the video's last moment. */
+const CLOSING_CARD_MS = 1500;
 
 /** A card option to a card, or nothing. Exported for tests. */
 export function cardOf(v: boolean | string | CardOptions | undefined, fallback: CardOptions): CardOptions | undefined {
@@ -284,14 +288,24 @@ const base = (file: string) => file.replace(/\.[^./]+$/, '');
 /** From a capture to files. Exported for tests (a capture can be made up). */
 export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFormat }>, o: FinishOptions = {}): Promise<RenderResult> {
   const frames = cap.frames.slice().sort((a, b) => a.t - b.t);
-  const start = Math.max(frames[0].t, cap.playAt - LEAD_MS);
-  const end = cap.stopAt;
-  const cut = editList(cap.events, { start, end, maxWaitMs: o.cuts?.maxWaitMs ?? DEFAULT_MAX_WAIT_MS });
-  const stamps = frames.map((f) => f.t);
+  const capCards = cap.cards ?? [];
+  // A card is a moment of the video even when the page sent no frame then (a still page sends none): the video
+  // starts no later than its first card, and a card in its last moments closes it (no flash of the app after).
+  const firstCard = capCards.length ? Math.min(...capCards.map((c) => c.t)) : Infinity;
+  const lastCard = capCards.length ? Math.max(...capCards.map((c) => c.t)) : -Infinity;
+  const start = Math.min(Math.max(frames[0].t, cap.playAt - LEAD_MS), firstCard);
+  const end = lastCard >= cap.stopAt - CLOSING_CARD_MS ? Math.min(cap.stopAt, lastCard + 1) : cap.stopAt;
   const warnings: string[] = [];
+  const narr = o.narration?.lines.size ? o.narration : null;
+  // Cards between scenes: each as long as asked, or as its line when it is narrated (and a little more).
+  const cards = capCards.map((c) => {
+    const line = c.step !== undefined ? narr?.lines.get(c.step) : undefined;
+    return { ...c, ms: Math.max(c.ms, line ? msOf(line.audio) + CARD_PAD_MS : 0) };
+  });
+  const cut = withCards(editList(cap.events, { start, end, maxWaitMs: o.cuts?.maxWaitMs ?? DEFAULT_MAX_WAIT_MS }), cards);
+  const stamps = frames.map((f) => f.t);
 
   // Narration: place each line, and hold the video where a line would run over its step.
-  const narr = o.narration?.lines.size ? o.narration : null;
   let said: ReturnType<typeof planNarration> | null = null;
   let held = cut;
   if (narr) {
@@ -341,7 +355,8 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
     return {
       segs: sg, contentMs: ms,
       cam: o.camera ? cameraPath(actionsOf(cap.events, sg, scale), { width: srcW, height: srcH, ...(typeof o.camera === 'object' && o.camera.zoom ? { zoom: o.camera.zoom } : {}) }) : null,
-      cues: o.captions ? stepCues(cap.events, sg, ms) : [],
+      // A card says its own words: no caption over it or after it.
+      cues: o.captions ? stepCues(cap.events.map((e) => (e.stepType === 'card' ? { ...e, say: undefined } : e)), sg, ms) : [],
     };
   };
   const main = variant(segs);
@@ -351,7 +366,7 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
   const titleMs = o.cards?.title ? TITLE_MS : 0;
   const endMs = o.cards?.end ? END_MS : 0;
   const full: Rect = { x: 0, y: 0, w: srcW, h: srcH };
-  const needLayers = frameStyle !== 'none' || canvases.some(Boolean) || !!mark || (burn && (cues.length > 0 || plain.cues.length > 0)) || !!o.cards?.title || !!o.cards?.end;
+  const needLayers = frameStyle !== 'none' || canvases.some(Boolean) || !!mark || (burn && (cues.length > 0 || plain.cues.length > 0)) || !!o.cards?.title || !!o.cards?.end || cards.length > 0;
 
   const browser = needLayers ? await chromium.launch() : null;
   let layers: Layers | null = null;
@@ -372,7 +387,9 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
       const cues = v.cues;
       const times = frameTimes(segs, fps);
       const picks = pickFrames(stamps, times);
-      const art = await artFor(layers, layout, { frameStyle, background, cues: burn ? cues : [], urls: [...new Set(cap.events.map((e) => e.url).filter(Boolean) as string[])], titles: cap.titles ?? {}, cards: o.cards, mark });
+      const art = await artFor(layers, layout, { frameStyle, background, cues: burn ? cues : [], urls: [...new Set(cap.events.map((e) => e.url).filter(Boolean) as string[])], titles: cap.titles ?? {}, cards: o.cards, mid: cards.map((c) => c.card), mark });
+      // Which card each content frame shows (at this output's fps).
+      const cardAt = cards.length ? cardFrames(segs, fps) : [];
 
       const nTitle = Math.round((titleMs * fps) / 1000);
       const nEnd = Math.round((endMs * fps) / 1000);
@@ -380,7 +397,18 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
       const total = nTitle + picks.length + nEnd;
 
       let last: { key: string; img: Image } | null = null;
+      /** Content frame k: the app, or a card (fading in from the app before it and out to the app after). */
       const content = (k: number): Image => {
+        const c = cardAt[k];
+        if (c === undefined) return app(k);
+        const img = art.mid[c];
+        let s = k; while (s > 0 && cardAt[s - 1] === c) s -= 1;
+        let e = k; while (e + 1 < cardAt.length && cardAt[e + 1] === c) e += 1;
+        if (k - s < nFade && s > 0 && cardAt[s - 1] === undefined) return crossfade(app(s - 1), img, (k - s + 1) / nFade);
+        if (e - k < nFade && e + 1 < picks.length && cardAt[e + 1] === undefined) return crossfade(img, app(e + 1), 1 - (e - k) / nFade);
+        return img;
+      };
+      const app = (k: number): Image => {
         const t = (k * 1000) / fps;
         const i = picks[k];
         const rect = cam ? cam(t) : full;
@@ -509,7 +537,7 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
     durationMs: Math.round(contentMs + titleMs + endMs),
     offsetMs: titleMs,
     rawMs: Math.round(end - start),
-    segments: segs.map((s) => ({ from: rel(s.from), to: rel(s.to), ...(s.hold ? { hold: s.hold } : {}) })),
+    segments: segs.map((s) => ({ from: rel(s.from), to: rel(s.to), ...(s.hold ? { hold: s.hold } : {}), ...(s.card !== undefined ? { card: s.card } : {}) })),
     events: cap.events.map((e) => ({ ...e, t: rel(e.t) })),
     outputs,
     ...(poster ? { poster } : {}),
@@ -535,7 +563,7 @@ export function namedChapters(names: ReadonlyArray<{ index: number; name: string
   return starts.map((c, k) => ({ start: c.t, end: starts[k + 1]?.t ?? endMs, text: c.text }));
 }
 
-interface Art { base: Map<string, Image> | null; captions: Map<string, Image>; title?: Image; end?: Image; badge?: { img: Image; x: number; y: number; alpha: number } }
+interface Art { base: Map<string, Image> | null; captions: Map<string, Image>; title?: Image; end?: Image; mid: Image[]; badge?: { img: Image; x: number; y: number; alpha: number } }
 
 /** Where a badge w×h sits in a picture W×H: in its corner, a margin of 2.5% of the shorter side from the edges. */
 export function badgeAt(W: number, H: number, w: number, h: number, at: Corner = 'bottom-right'): { x: number; y: number } {
@@ -544,8 +572,8 @@ export function badgeAt(W: number, H: number, w: number, h: number, at: Corner =
 }
 
 /** Everything Chromium draws for one output size, made before the frames. */
-async function artFor(layers: Layers | null, layout: Layout, o: { frameStyle: FrameStyle; background: string; cues: readonly Cue[]; urls: string[]; titles: Record<string, string>; cards?: FinishOptions['cards']; mark?: Watermark }): Promise<Art> {
-  const art: Art = { base: null, captions: new Map() };
+async function artFor(layers: Layers | null, layout: Layout, o: { frameStyle: FrameStyle; background: string; cues: readonly Cue[]; urls: string[]; titles: Record<string, string>; cards?: FinishOptions['cards']; mid?: CardOptions[]; mark?: Watermark }): Promise<Art> {
+  const art: Art = { base: null, captions: new Map(), mid: [] };
   if (!layers) return art;
   if (o.frameStyle !== 'none' || layout.canvas) {
     art.base = new Map();
@@ -559,6 +587,7 @@ async function artFor(layers: Layers | null, layout: Layout, o: { frameStyle: Fr
   }
   if (o.cards?.title) art.title = await layers.card(layout, { ...o.cards.title, background: o.background });
   if (o.cards?.end) art.end = await layers.card(layout, { ...o.cards.end, background: o.background });
+  for (const c of o.mid ?? []) art.mid.push(await layers.card(layout, { ...c, background: o.background }));
   if (o.mark) {
     const img = await layers.badge(o.mark.text, { fontPx: Math.max(11, Math.round(Math.min(layout.width, layout.height) * 0.024)), ...(o.mark.logo ? { logo: o.mark.logo } : {}) });
     const { x, y } = badgeAt(layout.width, layout.height, img.width, img.height, o.mark.at);
@@ -568,6 +597,7 @@ async function artFor(layers: Layers | null, layout: Layout, o: { frameStyle: Fr
       const c = art[k];
       if (c) { const d = copy(c); overlay(d, img, x, y, art.badge.alpha); art[k] = d; }
     }
+    art.mid = art.mid.map((c) => { const d = copy(c); overlay(d, img, x, y, art.badge!.alpha); return d; });
   }
   return art;
 }

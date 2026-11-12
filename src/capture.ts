@@ -9,6 +9,7 @@
 import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 import type { Page } from 'playwright';
+import type { CardOptions } from './layers';
 import type { TimelineEvent } from './timeline';
 
 export interface CaptureOptions {
@@ -64,6 +65,11 @@ export interface Capture {
   playAt: number;
   stopAt: number;
   endAt: number | null;
+  /**
+   * Cards between scenes (a director clip's `d.card`): each shown for `ms` at source time `t`. A narrated card's
+   * step sits just after `t` (t + 1), so its line is spoken over the card, and the card lasts as long as its line.
+   */
+  cards?: Array<{ t: number; ms: number; card: CardOptions; step?: number }>;
 }
 
 export class RenderError extends Error {

@@ -28,7 +28,8 @@ export interface Span { from: number; to: number; phase: Phase }
  * A kept stretch of the capture, in source time. A hold (from === to, `hold` ms) shows the frame at `from`
  * for that long: the video waits, for instance while a narrated line finishes.
  */
-export interface Segment { from: number; to: number; hold?: number }
+/** A stretch of the source (from–to), or a frozen moment (`hold` ms at `from`); `card` shows a capture's card instead. */
+export interface Segment { from: number; to: number; hold?: number; card?: number }
 
 const lenOf = (s: Segment) => (s.hold ? s.hold : s.to - s.from);
 
@@ -138,6 +139,47 @@ export function withHolds(segs: readonly Segment[], holds: ReadonlyArray<{ at: n
     if (s.to > from) out.push({ from, to: s.to });
   }
   return out;
+}
+
+/**
+ * Insert cards (a director's `d.card`): each `{ t, ms }` (t = source time) is shown for `ms` at that moment, as a
+ * held segment marked with its index in `cards`. A card at a cut-out moment goes where the next kept stretch starts.
+ */
+export function withCards(segs: readonly Segment[], cards: ReadonlyArray<{ t: number; ms: number }>): Segment[] {
+  const marks = cards.map((c, card) => ({ src: c.t, ms: Math.round(c.ms), card })).filter((m) => m.ms > 0).sort((a, b) => a.src - b.src);
+  if (!marks.length) return segs.map((s) => ({ ...s }));
+  const out: Segment[] = [];
+  let k = 0;
+  for (const s of segs) {
+    if (s.hold) { out.push({ ...s }); continue; }
+    let from = s.from;
+    while (k < marks.length && marks[k].src <= s.to) {
+      const m = marks[k++];
+      const at = Math.max(from, m.src);
+      if (at > from) out.push({ from, to: at });
+      out.push({ from: at, to: at, hold: m.ms, card: m.card });
+      from = at;
+    }
+    if (s.to > from) out.push({ from, to: s.to });
+  }
+  // After the last kept moment: at the end.
+  const last = segs.length ? segs[segs.length - 1].to : 0;
+  for (; k < marks.length; k += 1) out.push({ from: last, to: last, hold: marks[k].ms, card: marks[k].card });
+  return out;
+}
+
+/** For every output frame at `fps`, the card it shows (its index), or undefined for the app. */
+export function cardFrames(segs: readonly Segment[], fps: number): Array<number | undefined> {
+  const n = Math.max(1, Math.round((durationOf(segs) / 1000) * fps));
+  return Array.from({ length: n }, (_, k) => {
+    let left = (k * 1000) / fps;
+    for (const s of segs) {
+      const len = lenOf(s);
+      if (left < len) return s.card;
+      left -= len;
+    }
+    return undefined;
+  });
 }
 
 /** The source time of every output frame at `fps`. */

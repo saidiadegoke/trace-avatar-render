@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.1.5 (unreleased)
+## 0.1.6 (unreleased)
+
+- **Cards between scenes** (`Capture.cards` in `finish()`; `withCards`, `cardFrames`): a card shown for its time at a
+  moment of the capture, in the title and end cards' look, fading in and out. A narrated card lasts as long as its
+  line. For pitch videos: the problem, the result and the ask on cards, between the app's scenes.
+
+## 0.1.5 (12 Nov 2026)
 
 - **Several shapes from one capture**: `--out file.mp4@1:1` (`OutSpec.canvas` in `render()` and `finish()`) gives
   that output its own canvas, over `--canvas`. A 16:9, a 1:1 and a 4:5 cut of one run need one capture, not three
