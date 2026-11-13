@@ -25,7 +25,7 @@ import { layoutOf } from './layout';
 import { canvasOf, watermarkOf } from './brand';
 import type { CanvasSpec, Corner, Watermark } from './brand';
 import type { FrameStyle, Layout } from './layout';
-import { encodeMp4, findFfmpeg } from './mp4';
+import { encodeMp4, FFMPEG_MISSING, findFfmpeg } from './mp4';
 import { actionsOf, cueAt, pageAt, stepCues } from './plan';
 import { cardFrames, durationOf, editList, frameTimes, outputAt, pickFrames, withCards, withHolds, DEFAULT_MAX_WAIT_MS } from './timeline';
 import { mix, msOf, toWav, trimSilence, TRACK_RATE } from './audio';
@@ -201,7 +201,7 @@ export function cardOf(v: boolean | string | CardOptions | undefined, fallback: 
 }
 
 export async function render(o: RenderOptions): Promise<RenderResult> {
-  const trace = typeof o.trace === 'string' ? JSON.parse(readFileSync(o.trace, 'utf8')) : o.trace;
+  let trace = typeof o.trace === 'string' ? JSON.parse(readFileSync(o.trace, 'utf8')) : o.trace;
   if (!trace || typeof trace !== 'object') throw new RenderError('the trace must be an object or a .trace.json path');
   const mode = o.mode ?? 'overlay';
   if (mode === 'perform' && !o.allowPerform) {
@@ -211,7 +211,7 @@ export async function render(o: RenderOptions): Promise<RenderResult> {
   if (!outs.length) throw new RenderError('nothing to write: give at least one output (.gif or .mp4)');
   // Fail before the capture, not after it.
   const ffmpeg = outs.some((x) => x.format === 'mp4') ? findFfmpeg() : null;
-  if (outs.some((x) => x.format === 'mp4') && !ffmpeg) throw new RenderError('MP4 needs ffmpeg: install it (brew install ffmpeg, apt install ffmpeg) or set FFMPEG to its path. GIF works without it.');
+  if (outs.some((x) => x.format === 'mp4') && !ffmpeg) throw new RenderError(FFMPEG_MISSING);
   const t = trace as { meta?: { title?: string; viewport?: { w: number; h: number } }; avatar?: { name?: string; color?: string } };
   const viewport = o.viewport ?? t.meta?.viewport ?? { w: 1280, h: 800 };
   const burn = o.captions === 'burn' || o.captions === 'both';
@@ -221,6 +221,12 @@ export async function render(o: RenderOptions): Promise<RenderResult> {
     ? linesOf((trace as { steps?: Array<{ say?: string }> }).steps ?? [], o.script === undefined ? undefined : parseScript(typeof o.script === 'string' ? JSON.parse(readFileSync(o.script, 'utf8')) : o.script))
     : null;
   if (spoken && !spoken.size) throw new RenderError('nothing to say: no step has a caption (say), and no script was given');
+  // Narrated from a script, each step says its spoken line: the captions (and the player's bubble) show what is heard.
+  // Found 2026-11-12: captions kept the steps' own words while the voice read the script's.
+  if (spoken && o.script !== undefined) {
+    const steps = (trace as { steps?: Array<{ say?: string }> }).steps ?? [];
+    trace = { ...(trace as object), steps: steps.map((st, i) => (spoken.has(i) && spoken.get(i) !== st.say ? { ...st, say: spoken.get(i) } : st)) };
+  }
 
   if (o.repairVision && !(o.repair && o.ai)) throw new RenderError('repairVision needs repair and an AI');
   const capOpts = {

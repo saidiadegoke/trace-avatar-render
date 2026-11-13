@@ -16,6 +16,7 @@ import { RenderError } from './capture';
 import { render } from './render';
 import { brandFile, canvasOf, CORNERS, watermarkOf } from './brand';
 import { checkCatalogue } from './catalogue';
+import { makeCampaign, readCampaign, statusOf } from './campaign';
 import type { Corner, Watermark } from './brand';
 
 export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out <file.gif|file.mp4> [options]
@@ -88,6 +89,11 @@ Suggestions for a person to accept (the renderer never changes a trace):
   trace-avatar-render suggest <trace.json> --task captions|title|waits|narration --ai <provider> [--tone friendly|terse|formal]
                           [--hints hints.json] [--out suggestions.json]
   trace-avatar-render apply <trace.json> <suggestions.json> --accept 1,3|all --out <new.trace.json>
+
+A product's marketing videos from one campaign.json (every look and shape; progress kept, a stopped run carries on):
+  trace-avatar-render campaign check  [campaign.json]      every problem at once
+  trace-avatar-render campaign make   [campaign.json] [video ids…] [--start] [--fresh] [--voice <voice>]
+  trace-avatar-render campaign status [campaign.json]      done, failed, and what it's on now
 
 A clip catalogue (trace-avatar-catalogue/1, schemas/catalogue-1.json):
   trace-avatar-render catalogue check <file.json|https://…> [--fetch] [--json]
@@ -277,8 +283,9 @@ export function reportOf(err: unknown, traceFile: string, repairFile?: string): 
 export class UsageError extends Error {}
 
 export async function main(argv: string[], io = { log: console.log, error: console.error }): Promise<number> {
-  if (argv[0] === 'suggest' || argv[0] === 'apply' || argv[0] === 'catalogue') {
-    try { return await (argv[0] === 'suggest' ? suggestCmd(argv.slice(1), io) : argv[0] === 'apply' ? applyCmd(argv.slice(1), io) : catalogueCmd(argv.slice(1), io)); } catch (e) {
+  if (argv[0] === 'suggest' || argv[0] === 'apply' || argv[0] === 'catalogue' || argv[0] === 'campaign') {
+    const cmds = { suggest: suggestCmd, apply: applyCmd, catalogue: catalogueCmd, campaign: campaignCmd } as const;
+    try { return await cmds[argv[0]](argv.slice(1), io); } catch (e) {
       io.error(`trace-avatar-render ${argv[0]}: ${(e as Error).message}`);
       if (e instanceof UsageError) io.error(USAGE);
       return e instanceof UsageError ? 2 : 1;
@@ -372,6 +379,25 @@ async function applyCmd(argv: string[], io: { log: (m: string) => void }): Promi
   const next = applySuggestions(readJson(file) as Parameters<typeof applySuggestions>[0], all.filter((x) => ids.includes(x.id)));
   writeFileSync(values.out, `${JSON.stringify(next, null, 2)}\n`);
   io.log(`applied ${ids.length} of ${all.length} to ${values.out}`);
+  return 0;
+}
+
+/** campaign check|make|status [campaign.json] …: 0 done, 1 a video failed (or problems), 2 usage. */
+async function campaignCmd(argv: string[], io: { log: (m: string) => void; error: (m: string) => void }): Promise<number> {
+  const { values, positionals } = parseArgs({ args: argv, allowPositionals: true, options: { start: { type: 'boolean' }, fresh: { type: 'boolean' }, voice: { type: 'string' } } });
+  const [sub, ...rest] = positionals;
+  const file = rest[0] && /\.json$/i.test(rest[0]) ? rest.shift()! : 'campaign.json';
+  if (sub !== 'check' && sub !== 'make' && sub !== 'status') throw new UsageError('campaign check, make or status');
+  if (!existsSync(file)) throw new UsageError(`no campaign file ${file}`);
+  if (sub === 'status') { io.log(statusOf(readCampaign(file, { files: false }))); return 0; }
+  if (sub === 'check') {
+    const c = readCampaign(file);
+    io.log(`${file}: ${c.product}, ${c.videos.length} video${c.videos.length === 1 ? '' : 's'} in ${Object.keys(c.looks).length} look${Object.keys(c.looks).length === 1 ? '' : 's'} — ready to make`);
+    return 0;
+  }
+  const c = readCampaign(file);
+  const r = await makeCampaign(c, { only: rest, start: !!values.start, fresh: !!values.fresh, ...(values.voice !== undefined ? { voice: values.voice } : {}), log: io.log });
+  if (r.failed.length) { io.error(`\n${r.failed.length} failed:\n  ${r.failed.join('\n  ')}`); return 1; }
   return 0;
 }
 

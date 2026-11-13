@@ -155,6 +155,58 @@ frames move with the holds. GIFs from the same render keep the original timing. 
 `<out>.narration.txt`. `suggest --task narration` drafts spoken lines from the steps (nothing typed is sent) for a
 person to edit and pass with `--script`.
 
+## Campaigns
+
+A product's marketing videos, in every look and shape, from one `campaign.json`:
+
+```json
+{
+  "product": "acme", "site": "https://acme.com", "narrator": "gateway",
+  "app": {
+    "name": "Acme", "url": "http://127.0.0.1:3000", "dir": "..", "start": ["npm", "run", "demo"], "ready": "/login",
+    "guides": "demo/guides.json", "storageState": "demo/storage-state.json",
+    "reset": { "post": "http://127.0.0.1:3001/demo/reset" }, "alias": "acme.com"
+  },
+  "looks": { "product": { "brand": "brands/acme.json" } },
+  "videos": [
+    { "id": "intro", "kind": "intro", "guide": "send-your-first-invoice", "mode": "perform",
+      "shapes": ["16:9", "1:1", "9:16"], "voice": { "product": "scripts/intro.json" }, "polish": ["--title-card"],
+      "alt": "Acme sends a first invoice: the customer picked, two lines added, then Send." },
+    { "id": "ad-paid", "kind": "ad", "director": "directors/ad-paid.mjs", "page": "/invoices",
+      "shapes": ["9:16", "1:1"], "voice": { "product": "scripts/ad-paid.json" }, "reset": { "start": "paid" },
+      "alt": "Acme ad: an invoice marked paid the moment the transfer lands." }
+  ]
+}
+```
+
+```bash
+trace-avatar-render campaign check                 # every problem at once (guides, scripts' lines, looks …)
+trace-avatar-render campaign make --start          # start the app, make every render; or name video ids
+trace-avatar-render campaign status                # from another terminal: done, failed, what it's on now
+```
+
+- Each video is made per look. The desktop shapes (16:9, 1:1, 4:5) come from one capture, each on its own canvas,
+  with captions as a file; 9:16 is captured again at a phone's size with its captions burned in.
+- A video is a **guide** (an id in `app.guides`, or a `.trace.json`) or a **director script**:
+
+  ```js
+  export default async function (d) {
+    await d.card('Get paid the day you send it.');                 // a card between scenes, spoken when narrated
+    await d.scene('Pick the customer, add two lines, send.', async () => {
+      await d.click(d.page.getByRole('button', { name: 'New invoice' }));   // real mouse events; cursor drawn after
+      await d.type(d.page.getByLabel('Customer'), 'Ada Stores');
+      await d.read(600);
+    });
+    await d.skip(async () => { /* a long wait, cut to a jump */ });
+  }
+  ```
+
+  Line *n* of a narration script is scene *n* (cards count). Narrated, the captions are the spoken lines.
+- `app.reset` puts the app back before every video (the video's `reset` is the body), so a video made twice looks
+  the same. `app.alias` shows it under its public name, answered locally.
+- Files go to `out/<product>/` with `made.json`, each render's `.scenes.json` (its words in order, for a
+  catalogue's `says`) and `progress.json`. A run stopped part way carries on; `--fresh` starts over.
+
 ## A clip catalogue
 
 Published videos are listed in a **clip catalogue**: a public JSON file (`trace-avatar-catalogue/1`, schema in

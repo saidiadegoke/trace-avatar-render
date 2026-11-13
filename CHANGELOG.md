@@ -1,6 +1,29 @@
 # Changelog
 
-## 0.1.7 (unreleased)
+## 0.2.0 (unreleased)
+
+- **Campaigns** (`campaign.json`): a product's marketing videos, made on the real app in every look and shape.
+  - `trace-avatar-render campaign check | make | status [campaign.json]`, and `readCampaign`, `makeCampaign`,
+    `statusOf`, `rendersOf`, `filesOf`, `endsWithOf`, `saysOf` from code.
+  - Per video and look: one desktop capture written as 16:9, 1:1 and 4:5 (captions as a file), and a phone capture
+    (390×844) for 9:16 with captions burned in. A video is a guide or a director script.
+  - The app: started with `--start` (`app.start`, ready at `app.ready` or when it prints `app.readyText`), put back
+    to a known state before each video (`app.reset`: `{ post }` or `{ run }`, with the video's `reset` as its body),
+    signed in with `app.storageState` or a session module (`storageStateFor(url, options)`), shown under its public
+    name (`app.alias`), with prop folders served at its address (`app.routes`).
+  - Looks are named brand files; a look's `endsWith` (or its brand's end card) is what its videos end with.
+  - Progress in `<out>/progress.json` while it runs; a run stopped part way carries on (`--fresh` starts over);
+    `<out>/made.json` lists what was made. It stops before capturing anything when there's no ffmpeg or the voice
+    can't be reached.
+- **Director videos** (`direct()`): a script plays a person using the app — `d.scene`, `d.card`, `d.click`,
+  `d.type`, `d.hover`, `d.press`, `d.read`, `d.skip`, `d.open`, `d.window`, `d.expect` (with `@playwright/test`) —
+  with the cursor drawn on afterwards; narrated, the captions say the spoken lines. Writes `<id>.scenes.json`.
+  `lookOptions()` gives finish() options from a brand and the video's flags.
+- **Narrated from a script, captions say the spoken lines** (render, `--script`): each step's caption is its line,
+  so the captions file and burned-in captions show what is heard (they kept the steps' own words).
+- **ffmpeg**: `ffmpeg-static` is an optional dependency, used when there's no `FFMPEG` and no ffmpeg on the PATH.
+
+## 0.1.7 (13 Nov 2026)
 
 - **The clip catalogue, `trace-avatar-catalogue/1`** (`schemas/catalogue-1.json`, also at
   https://traceavatar.com/schemas/catalogue-1.json): a public JSON file of a product's published videos, one entry per

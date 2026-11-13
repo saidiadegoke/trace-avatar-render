@@ -15,6 +15,8 @@ import { RenderError, findFfmpeg, outputAt, render } from '../../src/index';
 import { main } from '../../src/cli';
 
 const FIX = join(import.meta.dirname, 'fixtures');
+/** ffprobe reads the MP4s back (ffmpeg-static has no ffprobe: those checks need a full ffmpeg install). */
+const hasProbe = (() => { try { return spawnSync('ffprobe', ['-version'], { stdio: 'ignore' }).status === 0; } catch { return false; } })();
 let server: Server;
 let base = '';
 /** What page 2 reported reached the masked field. */
@@ -233,7 +235,7 @@ describe('render (Chromium)', () => {
     expect(edge(soft)).toBeLessThan(edge(sharp) / 2);
   });
 
-  it.runIf(!!findFfmpeg())('MP4 through ffmpeg', async () => {
+  it.runIf(!!findFfmpeg() && hasProbe)('MP4 through ffmpeg', async () => {
     const file = join(out, 'show.mp4');
     const r = await render({ trace: join(FIX, 'show.trace.json'), url: `${base}/app.html`, out: [{ file, fps: 24 }] });
     const probe = spawnSync('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-count_frames', '-show_entries', 'stream=width,height,nb_read_frames,pix_fmt', '-of', 'json', file], { encoding: 'utf8' });
@@ -248,7 +250,7 @@ describe('render (Chromium)', () => {
     expect(Number(p2.nb_read_frames)).toBe(f.outputs[0].frames);
   });
 
-  it.runIf(!!findFfmpeg())('narration: the voice speaks each line, the video holds where one runs long, the GIF keeps its timing', async () => {
+  it.runIf(!!findFfmpeg() && hasProbe)('narration: the voice speaks each line, the video holds where one runs long, the GIF keeps its timing', async () => {
     // A stand-in voice: a 440 Hz tone, 3 s for the first line (longer than the gap before its step), 0.6 s for the second.
     const said: string[] = [];
     const voice = async (text: string) => {

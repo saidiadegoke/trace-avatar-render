@@ -39,3 +39,7 @@ export { repairGuide, stallInspector, repairScriptOf } from './repair';
 export type { RepairOutcome, RepairSuggestion, Unresolved } from './repair';
 export { checkCatalogue, catalogueId, vttEnds, mp4Head, CATALOGUE_SPEC, CATALOGUE_KINDS, CATALOGUE_SHAPES, CATALOGUE_FORMATS, CATALOGUE_REQUIRED } from './catalogue';
 export type { Catalogue, CatalogueEntry, CatalogueCheck, CheckOptions } from './catalogue';
+export { direct, lookOptions, cardsOf, sayFrom, aliasOf, arrowSprite, drawCursor, cursorAt, withCursor, pathOf, travelMs, DIRECTOR_VIEWPORT, SKIP_KEEP_MS } from './director';
+export type { Alias, Director, DirectOptions, DirectResult, DirectorCard, LookOf, Scene, Session, Shot, Move, Point, Sprite } from './director';
+export { loadCampaign, checkCampaign, readCampaign, rendersOf, filesOf, shapeTag, endsWithOf, progressOf, statusOf, makeCampaign, ensureApp, saysOf, CAMPAIGN_KINDS, CAMPAIGN_SHAPES } from './campaign';
+export type { Campaign, CampaignApp, CampaignLook, CampaignVideo, CampaignRender, LoadedCampaign, Made, MakeOptions, Progress } from './campaign';

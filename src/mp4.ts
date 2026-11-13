@@ -1,23 +1,40 @@
 /**
  * MP4 (H.264) through the system ffmpeg: composed RGBA frames are piped in at a steady fps.
- * There is no bundled ffmpeg; without one on the PATH (or FFMPEG), MP4 output fails with a clear message.
+ * The ffmpeg is FFMPEG, else one on the PATH, else ffmpeg-static (an optional dependency, installed with the
+ * package where its platform has a build). Without any, MP4 output fails with a clear message.
  */
 
 import { spawn, spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
 
-/** The ffmpeg to use, or null. `FFMPEG` overrides the PATH. */
-export function findFfmpeg(env: NodeJS.ProcessEnv = process.env): string | null {
-  const bin = env.FFMPEG || 'ffmpeg';
+const works = (bin: string) => {
+  try { return spawnSync(bin, ['-version'], { stdio: 'ignore' }).status === 0; } catch { return false; }
+};
+
+/** ffmpeg-static's binary, when it is installed. */
+function bundled(): string | null {
   try {
-    const r = spawnSync(bin, ['-version'], { stdio: 'ignore' });
-    return r.status === 0 ? bin : null;
+    const p = createRequire(import.meta.url)('ffmpeg-static') as string | null;
+    return p && existsSync(p) ? p : null;
   } catch { return null; }
+}
+
+/** The ffmpeg to use, or null. `FFMPEG` is used as given (no fallback); else the PATH's; else ffmpeg-static's. */
+export function findFfmpeg(env: NodeJS.ProcessEnv = process.env, o: { bundled?: () => string | null } = {}): string | null {
+  if (env.FFMPEG) return works(env.FFMPEG) ? env.FFMPEG : null;
+  if (works('ffmpeg')) return 'ffmpeg';
+  const b = (o.bundled ?? bundled)();
+  return b && works(b) ? b : null;
 }
 
 /**
  * The ffmpeg arguments for raw RGBA frames of width×height piped in (the renderer composes them), and an
  * optional audio track (a WAV as long as the video). Exported for tests.
  */
+/** What to say when there is no ffmpeg. */
+export const FFMPEG_MISSING = 'MP4 needs ffmpeg: install ffmpeg-static (npm install ffmpeg-static), install ffmpeg (brew install ffmpeg, apt install ffmpeg), or set FFMPEG to its path. GIF works without it.';
+
 export function mp4Args(file: string, fps: number, size: { width: number; height: number }, audio?: string): string[] {
   return [
     '-y', '-loglevel', 'error',
@@ -34,7 +51,7 @@ export function mp4Args(file: string, fps: number, size: { width: number; height
 /** Write RGBA frames (one per output frame, even width and height) to an MP4. */
 export async function encodeMp4(frames: Iterable<Uint8Array>, o: { file: string; fps: number; width: number; height: number; ffmpeg?: string; audio?: string }): Promise<void> {
   const bin = o.ffmpeg ?? findFfmpeg();
-  if (!bin) throw new Error('MP4 needs ffmpeg: install it (brew install ffmpeg, apt install ffmpeg) or set FFMPEG to its path. GIF works without it.');
+  if (!bin) throw new Error(FFMPEG_MISSING);
   if (o.width % 2 || o.height % 2) throw new Error(`MP4 needs an even size (got ${o.width}×${o.height})`);
   const p = spawn(bin, mp4Args(o.file, o.fps, o, o.audio), { stdio: ['pipe', 'ignore', 'pipe'] });
   let err = '';
