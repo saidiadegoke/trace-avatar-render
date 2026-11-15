@@ -58,6 +58,8 @@ export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out
   --end-card [title]      a 2 s card last (default: "Done")
   --canvas <shape>        compose onto 9:16 (1080x1920), 4:5, 1:1, 16:9 or WxH: the app between safe margins on the
                           background, for Reels, Stories and feeds (--width scales the whole canvas)
+  --fill <shape>          outputs of this shape fill the picture: no window, no margins (repeat; e.g. --fill 16:9
+                          with --viewport 1280x720 and --out wide.mp4@16:9). The brand's "fill" sets it too
   --watermark <text>      a small badge on every frame, cards too, e.g. "Created with TraceAvatar · traceavatar.com"
   --watermark-at <corner> top-left, top-right, bottom-left or bottom-right (default)
   --brand <file.json>     the look in one file: canvas, watermark, frame, background, camera, captions, captionsAt,
@@ -136,7 +138,7 @@ export function parse(argv: string[]): Parsed {
       captions: { type: 'string' }, 'captions-at': { type: 'string' }, ai: { type: 'string' }, 'ai-vision': { type: 'string' }, alt: { type: 'boolean' },
       voice: { type: 'string' }, script: { type: 'string' }, 'voice-out': { type: 'string' }, 'voice-strict': { type: 'boolean' }, 'no-voice-cache': { type: 'boolean' },
       repair: { type: 'boolean' }, 'repair-vision': { type: 'boolean' }, report: { type: 'string' },
-      canvas: { type: 'string' }, watermark: { type: 'string' }, 'watermark-at': { type: 'string' }, brand: { type: 'string' },
+      canvas: { type: 'string' }, fill: { type: 'string', multiple: true }, watermark: { type: 'string' }, 'watermark-at': { type: 'string' }, brand: { type: 'string' },
     },
   });
   if (values.help) throw new UsageError('');
@@ -186,6 +188,7 @@ export function parse(argv: string[]): Parsed {
   if ((security !== undefined || values.value?.length) && mode !== 'perform') throw new UsageError('--security and --value are for --mode perform');
   const tryUsage = <T>(f: () => T): T => { try { return f(); } catch (e) { throw new UsageError((e as Error).message); } };
   if (values.canvas !== undefined) tryUsage(() => canvasOf(values.canvas!));
+  for (const f of values.fill ?? []) tryUsage(() => canvasOf(f));
   for (const o of values.out ?? []) { const m = /^.+\.(?:gif|mp4)@(.+)$/i.exec(o); if (m) tryUsage(() => canvasOf(m[1])); }
   const at = values['watermark-at'];
   if (at !== undefined && !CORNERS.includes(at as Corner)) throw new UsageError(`--watermark-at is ${CORNERS.join(', ')}`);
@@ -235,6 +238,7 @@ export function parse(argv: string[]): Parsed {
       ...(extra.title !== undefined ? { titleCard: extra.title } : {}),
       ...(extra.end !== undefined ? { endCard: extra.end } : {}),
       ...(values.canvas !== undefined ? { canvas: values.canvas } : {}),
+      ...(values.fill?.length ? { fill: values.fill } : {}),
       ...(watermark !== undefined ? { watermark } : {}),
       ...(extra.qa !== undefined ? { qa: true } : {}),
       ...(values.alt ? { alt: true } : {}),

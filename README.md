@@ -186,7 +186,10 @@ trace-avatar-render campaign status                # from another terminal: done
 ```
 
 - Each video is made per look. The desktop shapes (16:9, 1:1, 4:5) come from one capture, each on its own canvas,
-  with captions as a file; 9:16 is captured again at a phone's size with its captions burned in.
+  with captions as a file; 9:16 is captured again at a phone's size (the app's own mobile layout), captions as a file too.
+- A brand with `"fill": ["16:9"]` makes the wide file full screen: the desktop is captured at 1280×720 and fills the
+  picture with no window or margins, while 1:1 and 4:5 keep the brand's frame. `"9:16"` in `fill` does the same for
+  the phone: captured at 414×736, edge to edge. One narration serves every shape.
 - A video is a **guide** (an id in `app.guides`, or a `.trace.json`) or a **director script**:
 
   ```js

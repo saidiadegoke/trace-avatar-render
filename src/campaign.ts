@@ -8,7 +8,9 @@
  *
  * Each video is made once per look it lists. The desktop shapes (16:9, 1:1, 4:5) come from one capture, each written
  * on its own canvas; 9:16 is captured again at a phone's size (a desktop page in a tall canvas is too small to read),
- * with its captions burned in (Reels and Stories take no captions file). A video is a guide (played by the player) or
+ * with its captions as a file like the rest (off until the viewer turns them on). A look whose brand fills 16:9
+ * (`"fill": ["16:9"]`) captures the desktop at 1280×720, so the wide file is the app edge to edge and the other
+ * shapes keep the window; one that fills 9:16 captures the phone at 414×736 (exactly 9:16), edge to edge too. A video is a guide (played by the player) or
  * a director script (a person using the app, src/director.ts).
  *
  * Paths in the file are relative to it; the app's own files (guides, storageState, session) to the app's `dir`.
@@ -20,6 +22,7 @@ import { pathToFileURL } from 'node:url';
 import { parse, reportOf } from './cli';
 import { RenderError } from './capture';
 import { CATALOGUE_KINDS, CATALOGUE_SHAPES } from './catalogue';
+import { brandFile } from './brand';
 import { direct, lookOptions } from './director';
 import type { Alias } from './director';
 import { FFMPEG_MISSING, findFfmpeg } from './mp4';
@@ -32,6 +35,10 @@ export const CAMPAIGN_KINDS = CATALOGUE_KINDS;
 export const CAMPAIGN_SHAPES = CATALOGUE_SHAPES;
 const DESKTOP = ['16:9', '1:1', '4:5'];
 const PHONE = '390x844';
+/** The phone capture when 9:16 fills the picture: a phone at exactly 9:16 (414×736), so it fills it edge to edge. */
+const TALL = { width: 414, height: 736 };
+/** The desktop capture when 16:9 fills the picture (the look's "fill"): the same shape, so nothing is cropped or padded. */
+const WIDE = { width: 1280, height: 720 };
 
 export interface CampaignApp {
   /** Its name, on the cards. */
@@ -255,7 +262,7 @@ export function rendersOf(c: Campaign): CampaignRender[] {
       const desk = (v.shapes ?? []).filter((s) => DESKTOP.includes(s));
       // Desktop: captions as a file (uploaded beside the video where a platform takes one), never burned in.
       if (desk.length) out.push({ id: `${v.id}--${look}`, video: v, look, phone: false, shapes: desk, format: 'mp4', polish: ['--scale', '2', '--captions', 'vtt', '--poster', ...(v.polish ?? [])] });
-      if (v.shapes?.includes('9:16')) out.push({ id: `${v.id}--${look}--phone`, video: v, look, phone: true, shapes: ['9:16'], format: 'mp4', polish: ['--scale', '2', '--frame', 'none', '--captions', 'burn', '--poster', ...(v.polish ?? [])] });
+      if (v.shapes?.includes('9:16')) out.push({ id: `${v.id}--${look}--phone`, video: v, look, phone: true, shapes: ['9:16'], format: 'mp4', polish: ['--scale', '2', '--frame', 'none', '--captions', 'vtt', '--poster', ...(v.polish ?? [])] });
     }
   }
   return out;
@@ -448,6 +455,10 @@ export async function makeCampaign(c: LoadedCampaign, o: MakeOptions = {}): Prom
       for (const b of [outBase, firstBase]) for (const ext of ['vtt', 'chapters.vtt', 'png', 'scenes.json']) rmSync(`${b}.${ext}`, { force: true });
       const look = c.looks[r.look];
       const script = v.voice?.[r.look];
+      // A look that fills 16:9 is captured at 16:9 (1280×720), so the wide file is the app edge to edge.
+      const fill = (existsSync(look.brand) ? brandFile(look.brand).fill : undefined) ?? [];
+      const wide = !r.phone && r.shapes.includes('16:9') && fill.some((f) => String(f) === '16:9');
+      const tall = r.phone && fill.some((f) => String(f) === '9:16');
       const speak = !!(v.voice && voice);
       let traceFile = '';
       try {
@@ -458,12 +469,14 @@ export async function makeCampaign(c: LoadedCampaign, o: MakeOptions = {}): Prom
             id: r.id, script: v.director, url: c.app.url, page: v.page ?? '/', appName: c.app.name ?? '',
             out: outs.map((x) => ({ file: join(c.out, x.name), format: x.format, ...(x.canvas ? { canvas: x.canvas } : {}), ...(x.format === 'gif' ? { width: v.width ?? 800 } : {}) })),
             look: lookOptions({ title: v.title, endTitle: v.endTitle, polish: r.polish }, look.brand, c.app.name ?? ''),
-            ...(r.phone ? { viewport: { width: 390, height: 844 } } : {}),
+            ...(r.phone ? { viewport: tall ? TALL : { width: 390, height: 844 } } : wide ? { viewport: WIDE } : {}),
             ...(session ? { session } : c.app.storageState ? { session: c.app.storageState } : {}),
             ...(v.session ? { sessionOptions: v.session } : {}),
             ...(v.signedIn === false ? { signedOut: true } : {}),
             ...(c.app.alias ? { alias: c.app.alias } : {}),
             ...(c.app.routes ? { routes: c.app.routes } : {}),
+            // `d.app` in the script: the campaign's app, at the address the video shows (its alias, if it has one).
+            props: { app: { ...c.app, url: c.app.alias ? `https://${typeof c.app.alias === 'string' ? c.app.alias : c.app.alias.host}` : c.app.url } },
             ...(speak ? { voice: voice!, ...(script ? { voiceScript: script } : {}) } : {}),
             scenesFile: `${outBase}.scenes.json`,
             headless: !v.headed, ...(v.launchArgs ? { launchArgs: v.launchArgs } : {}), ...(v.tailMs !== undefined ? { tailMs: v.tailMs } : {}),
@@ -487,7 +500,8 @@ export async function makeCampaign(c: LoadedCampaign, o: MakeOptions = {}): Prom
           }
           const args = [trace, '--url', `${c.app.url.replace(/\/$/, '')}${g.page}`, '--navigate', '--brand', look.brand];
           if (storageState) args.push('--storage-state', storageState);
-          if (r.phone) args.push('--viewport', PHONE);
+          if (r.phone) args.push('--viewport', tall ? `${TALL.width}x${TALL.height}` : PHONE);
+          else if (wide) args.push('--viewport', `${WIDE.width}x${WIDE.height}`);
           if (r.format === 'gif') args.push('--width', String(v.width ?? 800));
           if (v.mode === 'perform') args.push('--mode', 'perform', '--allow-perform');
           for (const [name, text] of Object.entries(v.values ?? {})) args.push('--value', `${name}=${text}`);

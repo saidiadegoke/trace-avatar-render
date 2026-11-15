@@ -25,8 +25,8 @@ const even = (n: number) => Math.max(2, Math.round(n / 2) * 2);
  * The output size for a capture of srcW×srcH shown `width` wide (default: the capture's width, never
  * upscaled), with or without a browser window around it.
  */
-export function layoutOf(srcW: number, srcH: number, width: number | undefined, frame: FrameStyle = 'none', canvas?: Canvas): Layout {
-  if (canvas) return onCanvas(srcW, srcH, width, frame, canvas);
+export function layoutOf(srcW: number, srcH: number, width: number | undefined, frame: FrameStyle = 'none', canvas?: Canvas, fill = false): Layout {
+  if (canvas) return onCanvas(srcW, srcH, width, fill ? 'none' : frame, canvas, fill);
   if (frame === 'none') {
     // As E1: scaled down to the width, or cropped by a pixel to even sizes, never scaled up.
     const { width: W, height: H } = fitWidth(srcW, srcH, width);
@@ -56,13 +56,15 @@ export function layoutOf(srcW: number, srcH: number, width: number | undefined, 
  * more room at the bottom, where the platforms put their own buttons and the captions go. Unlike the other
  * layouts the app may be scaled up, to fill a phone-shaped canvas: capture at --scale 2 to keep it sharp.
  */
-function onCanvas(srcW: number, srcH: number, width: number | undefined, frame: FrameStyle, canvas: Canvas): Layout {
+function onCanvas(srcW: number, srcH: number, width: number | undefined, frame: FrameStyle, canvas: Canvas, fill = false): Layout {
   const W = even(width ? Math.min(width, canvas.width) : canvas.width);
   const H = even((canvas.height * W) / canvas.width);
   const tall = H / W > 1.2;
-  const padX = Math.round(W * 0.05);
-  const top = Math.round(H * (tall ? 0.1 : 0.07));
-  const bottom = Math.round(H * (tall ? 0.16 : 0.09));
+  // `fill`: the app fills the picture — no window, no margins (a capture of the canvas's shape fills it exactly;
+  // any other is fitted inside it, on the background).
+  const padX = fill ? 0 : Math.round(W * 0.05);
+  const top = fill ? 0 : Math.round(H * (tall ? 0.1 : 0.07));
+  const bottom = fill ? 0 : Math.round(H * (tall ? 0.16 : 0.09));
   const boxW = W - 2 * padX;
   const boxH = H - top - bottom;
   // The bar's height is a share of the window's width (as in the browser layout: 3.6% of the picture ≈ 3.9% of the window).

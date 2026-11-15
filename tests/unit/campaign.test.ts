@@ -73,12 +73,12 @@ describe('campaign file', () => {
     try { expect(loadCampaign(file).app.guides).toBe(join(dir, 'elsewhere', 'guides.json')); } finally { delete process.env.TRACE_AVATAR_APP_DIR; }
   });
 
-  it('renders: per look, a desktop capture for 16:9/1:1/4:5 (captions as a file) and a phone one for 9:16 (burned in)', () => {
+  it('renders: per look, a desktop capture for 16:9/1:1/4:5 (captions as a file) and a phone one for 9:16 (captions as a file too)', () => {
     const c = loadCampaign(folder().file);
     const rs = rendersOf(c);
     expect(rs.map((r) => r.id)).toEqual(['intro--product', 'intro--product--phone', 'intro--showcase', 'intro--showcase--phone', 'ad-paid--product', 'ad-paid--product--phone', 'gif-send--product']);
     expect(rs[0]).toMatchObject({ shapes: ['16:9', '1:1'], phone: false, format: 'mp4', polish: ['--scale', '2', '--captions', 'vtt', '--poster'] });
-    expect(rs[1]).toMatchObject({ shapes: ['9:16'], phone: true, polish: ['--scale', '2', '--frame', 'none', '--captions', 'burn', '--poster'] });
+    expect(rs[1]).toMatchObject({ shapes: ['9:16'], phone: true, polish: ['--scale', '2', '--frame', 'none', '--captions', 'vtt', '--poster'] });
     expect(rs[4].polish.at(-1)).toBe('--title-card');
     expect(filesOf(rs[0])).toEqual([
       { key: 'mp4@16:9', name: 'intro--product-16x9.mp4', format: 'mp4', canvas: '16:9' },

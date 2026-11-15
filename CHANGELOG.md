@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.1 (unreleased)
+
+- **`fill`**: a brand's `"fill": ["16:9"]` or `--fill <shape>` makes outputs of that shape fill the picture: no window, no
+  safe margins. A capture of the same shape (e.g. `--viewport 1280x720`) fills it exactly; another is fitted inside it.
+- **Campaigns**: a look that fills 16:9 captures the desktop at 1280×720, so the wide file is the app edge to edge while
+  1:1 and 4:5 keep the brand's frame. A look that fills 9:16 captures the phone at 414×736 (exactly 9:16), so the
+  tall file is the phone screen edge to edge.
+- **Campaigns, 9:16**: captions are a file (`--captions vtt`), like the other shapes, instead of burned in.
+- Director videos get `d.app`: the campaign's app, at the address the video shows.
+
 ## 0.2.0 (unreleased)
 
 - **Campaigns** (`campaign.json`): a product's marketing videos, made on the real app in every look and shape.

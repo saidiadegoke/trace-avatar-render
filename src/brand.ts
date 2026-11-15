@@ -57,6 +57,8 @@ export function watermarkOf(v: string | Watermark): Watermark {
 /** What a brand file may set: the polish options, nothing about what is played. */
 export interface Brand {
   canvas?: CanvasSpec;
+  /** Shapes that fill the picture (no window, no margins), e.g. ["16:9"]; the others keep `frame`. */
+  fill?: CanvasSpec[];
   watermark?: string | Watermark;
   frame?: 'none' | 'browser';
   background?: string;
@@ -67,7 +69,7 @@ export interface Brand {
   endCard?: boolean | string | CardOptions;
 }
 
-const KEYS = ['$comment', 'name', 'canvas', 'watermark', 'frame', 'background', 'camera', 'captions', 'captionsAt', 'titleCard', 'endCard'];
+const KEYS = ['$comment', 'name', 'canvas', 'fill', 'watermark', 'frame', 'background', 'camera', 'captions', 'captionsAt', 'titleCard', 'endCard'];
 
 /**
  * A brand checked: unknown keys and bad values are refused, naming each. Logo paths are resolved against
@@ -91,6 +93,10 @@ export function brandOf(json: unknown, dir = '.'): Brand {
   };
   const tryIt = (f: () => void) => { try { f(); } catch (e) { problems.push((e as Error).message); } };
   if (b.canvas !== undefined) tryIt(() => { canvasOf(b.canvas as CanvasSpec); out.canvas = b.canvas as CanvasSpec; });
+  if (b.fill !== undefined) {
+    if (Array.isArray(b.fill)) tryIt(() => { for (const f of b.fill as CanvasSpec[]) canvasOf(f); out.fill = b.fill as CanvasSpec[]; });
+    else problems.push('fill is a list of shapes, e.g. ["16:9"]');
+  }
   if (b.watermark !== undefined) tryIt(() => { const w = watermarkOf(b.watermark as string | Watermark); out.watermark = { ...w, ...(w.logo ? { logo: at(w.logo) } : {}) }; });
   if (b.frame !== undefined) { if (b.frame === 'none' || b.frame === 'browser') out.frame = b.frame; else problems.push('frame is none or browser'); }
   if (b.background !== undefined) { if (typeof b.background === 'string') out.background = b.background; else problems.push('background is a CSS colour or gradient'); }

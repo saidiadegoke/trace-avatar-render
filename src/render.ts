@@ -113,6 +113,9 @@ export interface RenderOptions {
   /** Compose onto a picture of this shape: '9:16' (1080×1920), '4:5', '1:1', '16:9', 'WxH' or { width, height }.
    *  The app is placed between safe margins on the background; an output's width scales the whole canvas. */
   canvas?: CanvasSpec;
+  /** Shapes whose outputs fill the picture: no window, no margins (e.g. ['16:9']). The other outputs keep `frame`.
+   *  Capture at the same shape (e.g. --viewport 1280x720 for 16:9) and nothing is cropped or padded. */
+  fill?: CanvasSpec[];
   /** A small badge on every frame, cards included: its text, or { text, at, opacity, logo }. */
   watermark?: string | Watermark;
   /** The AI for qa and alt (see trace-avatar/assist). Without it nothing calls a model. */
@@ -138,7 +141,7 @@ export interface RenderOptions {
 }
 
 /** What finish() takes besides the capture: the composing options, with the cards resolved. */
-export type FinishOptions = Pick<RenderOptions, 'cuts' | 'timeline' | 'frame' | 'background' | 'camera' | 'captions' | 'captionsAt' | 'poster' | 'canvas' | 'watermark'> & {
+export type FinishOptions = Pick<RenderOptions, 'cuts' | 'timeline' | 'frame' | 'background' | 'camera' | 'captions' | 'captionsAt' | 'poster' | 'canvas' | 'fill' | 'watermark'> & {
   cards?: { title?: CardOptions; end?: CardOptions };
   /** Check frames with this AI (the steps give it context). */
   qa?: { ai: Ai; title?: string; steps: Array<{ n: number; type: string; say?: string }> };
@@ -353,6 +356,8 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
   const canvas = o.canvas !== undefined ? canvasOf(o.canvas) : undefined;
   // Each output may name its own canvas: checked before anything is drawn.
   const canvases = outs.map((x) => (x.canvas !== undefined ? canvasOf(x.canvas) : canvas));
+  const fillShapes = (o.fill ?? []).map((f) => canvasOf(f));
+  const fills = canvases.map((c) => !!c && fillShapes.some((f) => f.width * c.height === f.height * c.width));
   const mark = o.watermark !== undefined ? watermarkOf(o.watermark) : undefined;
   const background = o.background ?? DEFAULT_BACKGROUND;
   const burn = o.captions === 'burn' || o.captions === 'both';
@@ -386,7 +391,7 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
     for (const [n, out] of outs.entries()) {
       mkdirSync(dirname(out.file) || '.', { recursive: true });
       const fps = out.fps ?? (out.format === 'gif' ? 12 : 30);
-      const layout = layoutOf(srcW, srcH, out.width ?? (out.format === 'gif' ? 800 : undefined), frameStyle, canvases[n]);
+      const layout = layoutOf(srcW, srcH, out.width ?? (out.format === 'gif' ? 800 : undefined), frameStyle, canvases[n], fills[n]);
       // A GIF has no sound, so it keeps the timing without holds.
       const v = out.format === 'gif' ? plain : main;
       const { cam, segs, contentMs } = v;

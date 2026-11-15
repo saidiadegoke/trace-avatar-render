@@ -37,6 +37,9 @@ describe('canvas, watermark and brand', () => {
       /unknown key speed.*a canvas is.*frame is none or browser.*captions is burn, vtt or both.*endCard is true/,
     );
     expect(() => brandOf([])).toThrow(/a JSON object/);
+    expect(brandOf({ frame: 'browser', fill: ['16:9'] })).toEqual({ frame: 'browser', fill: ['16:9'] });
+    expect(() => brandOf({ fill: '16:9' })).toThrow(/fill is a list of shapes/);
+    expect(() => brandOf({ fill: ['wide'] })).toThrow(/a canvas is/);
     const dir = mkdtempSync(join(tmpdir(), 'brand-'));
     writeFileSync(join(dir, 'b.json'), JSON.stringify({ $comment: 'x', name: 'NaijaPrices', watermark: { text: 'W', logo: 'l.svg' } }));
     expect(brandFile(join(dir, 'b.json'))).toEqual({ watermark: { text: 'W', logo: join(dir, 'l.svg') } });

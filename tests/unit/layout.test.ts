@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { canvasOf } from '../../src/brand';
 import { layoutOf } from '../../src/layout';
 
 describe('layoutOf', () => {
@@ -21,5 +22,17 @@ describe('layoutOf', () => {
     expect(layoutOf(640, 400, undefined, 'browser')).toMatchObject({ width: 696, height: 482, content: { w: 640, h: 400 } });
     // A small width keeps a usable bar.
     expect(layoutOf(320, 200, 320, 'browser').bar!.h).toBe(18);
+  });
+
+  it('fill: a capture of the canvas shape fills it edge to edge, with no window even when the frame is browser', () => {
+    const wide = layoutOf(1280, 720, undefined, 'browser', canvasOf('16:9'), true);
+    expect([wide.width, wide.height, wide.bar]).toEqual([1920, 1080, null]);
+    expect(wide.content).toEqual({ x: 0, y: 0, w: 1920, h: 1080 });
+    // Another shape is fitted inside, centred, on the background.
+    const tall = layoutOf(1280, 800, undefined, 'none', canvasOf('16:9'), true);
+    expect(tall.content.h).toBe(1080);
+    expect(tall.content.x).toBe(Math.round((1920 - tall.content.w) / 2));
+    // Without fill the same output keeps its window and margins.
+    expect(layoutOf(1280, 720, undefined, 'browser', canvasOf('16:9')).bar).not.toBeNull();
   });
 });
