@@ -144,6 +144,16 @@ export interface Shot { t: number; png: Buffer }
  * The frames finish() gets: each screencast frame, and one every 1/30 s while the cursor moves or a click ring shows,
  * all with the cursor drawn. A still page with a still cursor needs no more frames.
  */
+/**
+ * The scale of the captured frames (frame pixels per CSS pixel). Chrome's screencast does not always send frames at
+ * the device scale factor (headless, a 414×736 page at scale 2 comes as 414×736), so it is measured, not assumed.
+ */
+export function frameScale(shots: readonly Shot[], viewportWidth: number, fallback = 1): number {
+  if (!shots.length || !viewportWidth) return fallback;
+  const p = PNG.sync.read(shots[0].png);
+  return p.width / viewportWidth;
+}
+
 export function withCursor(shots: readonly Shot[], moves: readonly Move[], clicks: readonly Move[], o: { scale?: number; sprite?: Sprite } = {}): Shot[] {
   if (!shots.length) return [];
   const sprite = o.sprite ?? arrowSprite((o.scale ?? 1) * CURSOR_SIZE);
@@ -265,6 +275,11 @@ export interface DirectorCard { t: number; ms: number; title: string; url?: bool
  * A director's cards for finish(): each in the look of the video's end card (its logo and colour, else the title
  * card's), with its own title; the product's address only on those that ask for it.
  */
+/** What a card reads, as one line: its title, then its address when it shows one. */
+export function cardCaption(title: string, url?: string): string {
+  return url ? `${title.trim().replace(/[\s:,]+$/, '')} ${url}` : title;
+}
+
 export function cardsOf(cards: readonly DirectorCard[], finishCards: FinishOptions['cards'] = {}, appName = '') {
   const { title: _t, url, ...look } = (finishCards?.end ?? finishCards?.title ?? { sub: appName }) as CardOptions & { url?: string };
   return cards.map((c) => ({ t: c.t, ms: c.ms, step: c.step, card: { ...look, title: c.title, ...(c.url && url ? { url } : {}) } }));
@@ -567,11 +582,20 @@ export async function direct(o: DirectOptions): Promise<DirectResult> {
   shots.sort((a, b) => a.t - b.t);
 
   log(`${id}: ${scenes.length} scenes, ${shots.length} screencast frames; drawing the cursor …`);
-  const frames = withCursor(shots.filter((s) => s.t >= playAt - 400), moves, clicks, { scale: DSF });
-  const cap = { frames, viewport: { w: VP.width, h: VP.height, scale: DSF }, titles, events, playAt, stopAt, endAt: stopAt } as unknown as Parameters<typeof finish>[0] & { cards?: unknown };
+  const kept = shots.filter((s) => s.t >= playAt - 400);
+  // The cursor is drawn in the frames' own pixels: at the scale they came at, not the one asked for.
+  const scale = frameScale(kept, VP.width, DSF);
+  const frames = withCursor(kept, moves, clicks, { scale });
+  const cap = { frames, viewport: { w: VP.width, h: VP.height, scale }, titles, events, playAt, stopAt, endAt: stopAt } as unknown as Parameters<typeof finish>[0] & { cards?: unknown };
 
   const f: FinishOptions = { ...(o.look ?? {}), cuts: { maxWaitMs: skipped ? SKIP_KEEP_MS : 0 } };
-  if (cards.length) cap.cards = cardsOf(cards, f.cards, o.appName);
+  if (cards.length) {
+    const resolved = cardsOf(cards, f.cards, o.appName);
+    cap.cards = resolved;
+    // A card that shows the address says it too ("For more info visit acme.com"): its scene's caption is what the
+    // card reads, so the video's words (saysOf) don't end on "visit". Its spoken line is unchanged.
+    for (const c of resolved) if (c.card.url && scenes[c.step]) scenes[c.step].caption = cardCaption(c.card.title, c.card.url);
+  }
   let narrated = false;
   if (o.voice) {
     const lines = new Map<number, { text: string; audio: ReturnType<typeof trimSilence> }>();

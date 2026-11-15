@@ -1,6 +1,16 @@
 # Changelog
 
-## 0.2.1 (unreleased)
+## 0.2.2
+
+- A director card that shows the product's address (`card(title, { url: true })`) now records its caption with
+  the address ("For more info visit acme.com"), so a video's words (`saysOf`, a catalogue entry's `says`) no longer
+  end on "visit". Its spoken line, and the captions file (cards have no cue), are unchanged. `cardCaption()` is
+  exported.
+- Director videos captured at any size but 1280×800 (phone cuts, and 16:9 when the brand fills it) drew the cursor
+  at twice its place: Chrome's screencast sent the frames at 1× though the page was at scale 2. The frame scale is
+  now measured from the frames (`frameScale()`, exported), so the cursor and click ring land on what is clicked.
+
+## 0.2.1
 
 - **`fill`**: a brand's `"fill": ["16:9"]` or `--fill <shape>` makes outputs of that shape fill the picture: no window, no
   safe margins. A capture of the same shape (e.g. `--viewport 1280x720`) fills it exactly; another is fitted inside it.

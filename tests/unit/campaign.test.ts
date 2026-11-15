@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { checkCampaign, endsWithOf, filesOf, loadCampaign, progressOf, readCampaign, rendersOf, saysOf, statusOf } from '../../src/campaign';
-import { cardsOf, cursorAt, lookOptions, pathOf, sayFrom, travelMs, withCursor, arrowSprite, aliasOf } from '../../src/director';
+import { cardCaption, cardsOf, cursorAt, frameScale, lookOptions, pathOf, sayFrom, travelMs, withCursor, arrowSprite, aliasOf } from '../../src/director';
 import { main } from '../../src/cli';
 import { PNG } from 'pngjs';
 
@@ -141,6 +141,30 @@ describe('director helpers', () => {
       { t: 90, ms: 2200, step: 7, card: { color: '#123456', sub: 'Acme', title: 'Start free at', url: 'acme.com' } },
     ]);
     expect(cardsOf([{ t: 1, ms: 1, title: 'A', step: 0 }], {}, 'Acme')[0].card).toEqual({ sub: 'Acme', title: 'A' });
+  });
+
+  it('a card that shows the address reads with it, so the video\'s words don\'t end on "visit"', () => {
+    expect(cardCaption('For more info visit', 'smartstore.ng')).toBe('For more info visit smartstore.ng');
+    expect(cardCaption('Start free at', 'acme.com')).toBe('Start free at acme.com');
+    expect(cardCaption('Visit us: ', 'acme.com')).toBe('Visit us acme.com');
+    expect(cardCaption('The problem.')).toBe('The problem.');
+  });
+
+  it('the cursor goes where the frames say: their measured scale, not the one asked for', () => {
+    const png = (w: number, h: number) => { const p = new PNG({ width: w, height: h }); p.data.fill(255); return PNG.sync.write(p); };
+    // A phone page asked at scale 2 that Chrome sent at 1: the cursor must not be drawn at twice its place.
+    expect(frameScale([{ t: 0, png: png(414, 736) }], 414, 2)).toBe(1);
+    expect(frameScale([{ t: 0, png: png(828, 1472) }], 414, 2)).toBe(2);
+    expect(frameScale([], 414, 2)).toBe(2);
+    const [f] = withCursor([{ t: 0, png: png(414, 736) }], [{ t: 0, x: 300, y: 600 }], [], { scale: frameScale([{ t: 0, png: png(414, 736) }], 414, 2) });
+    const img = PNG.sync.read(f.png);
+    let minX = Infinity; let minY = Infinity;
+    for (let y = 0; y < img.height; y += 1) for (let x = 0; x < img.width; x += 1) {
+      if (img.data[(y * img.width + x) * 4] < 200) { minX = Math.min(minX, x); minY = Math.min(minY, y); }
+    }
+    // The arrow's tip is at (300, 600), inside the 414×736 frame (at scale 2 it would be off the frame).
+    expect(Math.abs(minX - 300)).toBeLessThan(6);
+    expect(Math.abs(minY - 600)).toBeLessThan(6);
   });
 
   it('a narration script can\'t name a scene the video doesn\'t have', () => {
