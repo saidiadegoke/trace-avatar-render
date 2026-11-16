@@ -220,3 +220,20 @@ describe('cli: campaign', () => {
     expect(JSON.parse(readFileSync(file, 'utf8')).product).toBe('acme');
   });
 });
+
+describe('reroute: addresses answered by others while filming', async () => {
+  const { rerouted } = await import('../../src/director');
+  const map = { 'https://api.example.com': 'https://demo-api.example.com', 'https://example.com': 'https://demo-shop.example.com/' };
+  it('keeps the path and query, at the other address', () => {
+    expect(rerouted('https://api.example.com/sites/7/orders?page=2', map)).toBe('https://demo-api.example.com/sites/7/orders?page=2');
+    expect(rerouted('https://example.com/adaezes-closet', map)).toBe('https://demo-shop.example.com/adaezes-closet');
+  });
+  it('leaves every other address alone (a look-alike host or another port too)', () => {
+    expect(rerouted('https://app.example.com/dashboard', map)).toBeNull();
+    expect(rerouted('https://api.example.com.evil.com/x', map)).toBeNull();
+    expect(rerouted('https://api.example.com:8443/x', map)).toBeNull();
+  });
+  it('refuses a map entry with a path', () => {
+    expect(() => rerouted('https://api.example.com/x', { 'https://api.example.com/v1': 'https://demo-api.example.com' })).toThrow(/without a path/);
+  });
+});

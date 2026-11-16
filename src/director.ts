@@ -350,6 +350,12 @@ export interface DirectOptions {
   alias?: Alias | string;
   /** Folders served at a path of the app's own address (props the app doesn't have): { '/__terminal': 'dir' }. */
   routes?: Record<string, string>;
+  /**
+   * Addresses answered by others while filming, the address bar unchanged: { 'https://api.example.com':
+   * 'https://demo-api.example.com' } films a live front end against a demo API. Only what the browser fetches is
+   * rerouted; a page its own server builds still asks that server's API.
+   */
+  reroute?: Record<string, string>;
   /** Narrate with this voice. */
   voice?: Voice;
   /** The spoken lines by scene (instead of each caption): a script or its path. */
@@ -392,6 +398,38 @@ async function routeAlias(context: BrowserContext, alias: ReturnType<typeof alia
   };
   await context.route(`${alias.url}/**`, forward(alias.local));
   if (alias.localApi) await context.route(`${alias.api}/**`, forward(alias.localApi));
+}
+
+/** An origin (scheme://host[:port]) or a reason it isn't one. */
+function originOf(u: string, what: string): string {
+  let x: URL;
+  try { x = new URL(u); } catch { throw new Error(`reroute: ${what} ${u} isn't an address`); }
+  if (!/^https?:$/.test(x.protocol) || (x.pathname !== '/' && x.pathname !== '') || x.search || x.hash) throw new Error(`reroute: ${what} ${u} is an address without a path (https://host)`);
+  return x.origin;
+}
+
+/** Where a request goes under a reroute map: the same path and query at the other origin, or null. */
+export function rerouted(url: string, map: Record<string, string>): string | null {
+  let u: URL;
+  try { u = new URL(url); } catch { return null; }
+  for (const [from, to] of Object.entries(map)) {
+    if (u.origin === originOf(from, 'from')) return `${originOf(to, 'to')}${u.pathname}${u.search}`;
+  }
+  return null;
+}
+
+async function routeReroute(context: BrowserContext, map: Record<string, string>) {
+  for (const [from, to] of Object.entries(map)) {
+    const origin = originOf(from, 'from');
+    originOf(to, 'to');
+    await context.route(`${origin}/**`, async (route) => {
+      const target = rerouted(route.request().url(), map)!;
+      // Redirects are followed here: a redirect handed to the browser would be fetched from the real address (the
+      // browser's next request after a redirect isn't routed), so the page it ends on is served at the asked-for one.
+      const response = await route.fetch({ url: target });
+      await route.fulfill({ response });
+    });
+  }
 }
 
 async function routeFolders(context: BrowserContext, base: string, routes: Record<string, string>) {
@@ -455,6 +493,7 @@ export async function direct(o: DirectOptions): Promise<DirectResult> {
         ...(state ? { storageState: state as never } : {}),
       });
       await routeAlias(context, alias);
+      if (o.reroute) await routeReroute(context, o.reroute);
       if (o.routes) await routeFolders(context, url, o.routes);
       const page = await context.newPage();
       const cdp: CDPSession = await context.newCDPSession(page);

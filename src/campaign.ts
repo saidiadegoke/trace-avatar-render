@@ -66,6 +66,8 @@ export interface CampaignApp {
   alias?: string | Alias;
   /** Folders served at a path of the app's own address, for director videos: { "/__props": "props" }. */
   routes?: Record<string, string>;
+  /** Addresses answered by others while filming (director videos): { "https://api.x.com": "https://demo-api.x.com" }. */
+  reroute?: Record<string, string>;
 }
 
 export interface CampaignLook {
@@ -477,6 +479,7 @@ export async function makeCampaign(c: LoadedCampaign, o: MakeOptions = {}): Prom
             ...(v.signedIn === false ? { signedOut: true } : {}),
             ...(c.app.alias ? { alias: c.app.alias } : {}),
             ...(c.app.routes ? { routes: c.app.routes } : {}),
+            ...(c.app.reroute ? { reroute: c.app.reroute } : {}),
             // `d.app` in the script: the campaign's app, at the address the video shows (its alias, if it has one).
             props: { app: { ...c.app, url: c.app.alias ? `https://${typeof c.app.alias === 'string' ? c.app.alias : c.app.alias.host}` : c.app.url } },
             ...(speak ? { voice: voice!, ...(script ? { voiceScript: script } : {}) } : {}),

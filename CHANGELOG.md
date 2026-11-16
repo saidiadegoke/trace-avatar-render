@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.4
+
+- `reroute` (in `direct()` and a campaign's `app`): addresses answered by others while filming, with the address bar unchanged, e.g. `{ "https://api.example.com": "https://demo-api.example.com" }` films a live front end against a demo API. Pages and API calls alike; redirects are followed inside (a redirect handed to the browser would reach the real address). Only what the browser fetches is rerouted. `rerouted(url, map)` is exported.
+
 ## 0.2.3
 
 - A director that fails leaves a screenshot of the page it was on: `failShot` in `direct()`; campaigns write `<out>/<render>.failed.png` (and remove a stale one when the render is made again).
