@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- A director that fails leaves a screenshot of the page it was on: `failShot` in `direct()`; campaigns write `<out>/<render>.failed.png` (and remove a stale one when the render is made again).
+
 ## 0.2.2
 
 - A director card that shows the product's address (`card(title, { url: true })`) now records its caption with

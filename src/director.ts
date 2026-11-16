@@ -343,6 +343,8 @@ export interface DirectOptions {
   session?: Session;
   /** Options for a session function, for the first window (a window of its own can pass others). */
   sessionOptions?: Record<string, unknown>;
+  /** Where to save a screenshot of the page when the script fails (to see what it was looking at). */
+  failShot?: string;
   /** Open the first window signed out (default false). */
   signedOut?: boolean;
   alias?: Alias | string;
@@ -565,7 +567,14 @@ export async function direct(o: DirectOptions): Promise<DirectResult> {
     playAt = Date.now();
     events.push({ t: playAt, type: 'play', url: path() });
     log(`${id}: playing …`);
-    await script(d);
+    try {
+      await script(d);
+    } catch (e) {
+      if (o.failShot) {
+        await d.page.screenshot({ path: o.failShot }).then(() => log(`${id}: the page when it failed: ${o.failShot}`), () => {});
+      }
+      throw e;
+    }
     await sleep(o.tailMs ?? 800);
     moves.push({ t: Date.now(), ...at });
     await cdp.send('Page.stopScreencast').catch(() => {});

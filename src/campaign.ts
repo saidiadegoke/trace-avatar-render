@@ -453,6 +453,7 @@ export async function makeCampaign(c: LoadedCampaign, o: MakeOptions = {}): Prom
       const firstBase = join(c.out, outs[0].name.replace(/\.[^.]+$/, ''));
       // What a render writes is found by looking for its files, so none may be left from an earlier one.
       for (const b of [outBase, firstBase]) for (const ext of ['vtt', 'chapters.vtt', 'png', 'scenes.json']) rmSync(`${b}.${ext}`, { force: true });
+      rmSync(join(c.out, `${r.id}.failed.png`), { force: true });
       const look = c.looks[r.look];
       const script = v.voice?.[r.look];
       // A look that fills 16:9 is captured at 16:9 (1280×720), so the wide file is the app edge to edge.
@@ -467,6 +468,7 @@ export async function makeCampaign(c: LoadedCampaign, o: MakeOptions = {}): Prom
         if (v.director) {
           const res = await direct({
             id: r.id, script: v.director, url: c.app.url, page: v.page ?? '/', appName: c.app.name ?? '',
+            failShot: join(c.out, `${r.id}.failed.png`),
             out: outs.map((x) => ({ file: join(c.out, x.name), format: x.format, ...(x.canvas ? { canvas: x.canvas } : {}), ...(x.format === 'gif' ? { width: v.width ?? 800 } : {}) })),
             look: lookOptions({ title: v.title, endTitle: v.endTitle, polish: r.polish }, look.brand, c.app.name ?? ''),
             ...(r.phone ? { viewport: tall ? TALL : { width: 390, height: 844 } } : wide ? { viewport: WIDE } : {}),
