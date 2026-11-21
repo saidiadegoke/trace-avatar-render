@@ -6,6 +6,10 @@
  * events. Frames come from Chromium's screencast, stamped on the same wall clock as the events.
  */
 
+import { isPayment, refuseScript } from './refuse';
+import type { RefuseSpec } from './refuse';
+import { blurScript } from './blur';
+import type { BlurSpec } from './blur';
 import { readFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 import type { Page } from 'playwright';
@@ -28,6 +32,10 @@ export interface CaptureOptions {
   hide?: string[];
   /** Selectors blurred before capture, as well as [data-trace-blur]. */
   blur?: string[];
+  /** Personal data blurred in the page as it shows: exact texts and/or contact details by pattern (blur.ts). */
+  autoBlur?: BlurSpec;
+  /** Actions switched off, refused in the page and on the network (refuse.ts); a refused payment fails the capture. */
+  refuse?: RefuseSpec;
   rate?: number;
   /** When a step is on another page, load that page (as an app's router would) instead of waiting for it. */
   navigate?: boolean;
@@ -170,6 +178,19 @@ export async function capture(o: CaptureOptions): Promise<Capture> {
     let wake: () => void = () => {};
     await context.exposeBinding('__taEvent', (_src, e: TimelineEvent) => { events.push(e); wake(); });
     await context.addInitScript({ content });
+    const blurring = blurScript(o.autoBlur);
+    if (blurring) await context.addInitScript({ content: blurring });
+    const refusing = refuseScript(o.refuse);
+    const refused: string[] = [];
+    if (refusing) {
+      await context.addInitScript({ content: refusing });
+      await context.route('**/*', (route) => {
+        const r = route.request();
+        if (!isPayment(r.method(), r.url())) return route.fallback();
+        refused.push(`${r.method()} ${new URL(r.url()).pathname}`);
+        return route.abort('blockedbyclient');
+      });
+    }
     const page = await context.newPage();
     const cdp = await context.newCDPSession(page);
     const frames: CapturedFrame[] = [];
@@ -229,6 +250,7 @@ export async function capture(o: CaptureOptions): Promise<Capture> {
     const titles: Record<string, string> = {};
     for (const e of events as Array<TimelineEvent & { title?: string }>) if (e.url && e.title && !titles[e.url]) titles[e.url] = e.title;
     for (const e of events as Array<TimelineEvent & { title?: string }>) delete e.title;
+    if (refused.length) throw new RenderError(`It needs paying, which is switched off for filming: refused ${refused[0]}`);
     return { frames, events, playAt, stopAt, endAt: done.type === 'end' ? done.t : null, viewport: { ...o.viewport, scale: o.scale ?? 1 }, titles };
   } finally {
     await browser.close();

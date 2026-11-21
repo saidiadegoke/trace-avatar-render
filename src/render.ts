@@ -39,6 +39,8 @@ import type { Segment, TimelineEvent } from './timeline';
 import { chapterCues, toVtt } from './vtt';
 import { describe as describeGuide } from 'trace-avatar/assist';
 import { runQa } from './ai';
+import type { BlurSpec } from './blur';
+import type { RefuseSpec } from './refuse';
 import type { Ai, QaFlag, QaFrame } from './ai';
 import { resize } from './image';
 import type { Cue } from './vtt';
@@ -85,6 +87,10 @@ export interface RenderOptions {
   values?: Record<string, string>;
   hide?: string[];
   blur?: string[];
+  /** Personal data blurred in the page as it shows: exact texts and/or patterns (blur.ts). */
+  autoBlur?: BlurSpec;
+  /** Actions switched off, refused while filming (refuse.ts). */
+  refuse?: RefuseSpec;
   rate?: number;
   /** The player build. Default: TRACE_AVATAR_PLAYER, else the installed trace-avatar's dist/trace-perform.min.js. */
   player?: string;
@@ -234,7 +240,7 @@ export async function render(o: RenderOptions): Promise<RenderResult> {
   if (o.repairVision && !(o.repair && o.ai)) throw new RenderError('repairVision needs repair and an AI');
   const capOpts = {
     url: o.url, mode, viewport, scale: o.scale, storageState: o.storageState,
-    playerFile: await findPlayer(o.player), hide: o.hide, blur: o.blur, rate: o.rate,
+    playerFile: await findPlayer(o.player), hide: o.hide, blur: o.blur, rate: o.rate, ...(o.autoBlur ? { autoBlur: o.autoBlur } : {}), ...(o.refuse ? { refuse: o.refuse } : {}),
     timeoutMs: o.timeoutMs, headless: o.headless, leadMs: LEAD_MS, ...(o.navigate ? { navigate: true } : {}),
     ...(o.security !== undefined ? { security: o.security } : {}), ...(o.values ? { values: o.values } : {}),
     ...(burn ? { captions: 'none' as const } : {}),

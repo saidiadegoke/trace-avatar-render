@@ -43,19 +43,20 @@ export async function providerOf(spec: string, env: NodeJS.ProcessEnv = process.
   throw new Error(`--ai is gateway, gateway:<provider>[/<model>][,<provider>…], openai:<model>, or a .js file (got "${spec}")`);
 }
 
-export const QA_KINDS = ['error', 'empty', 'stalled', 'personal-data', 'wrong-page', 'other'] as const;
+export const QA_KINDS = ['error', 'empty', 'stalled', 'personal-data', 'wrong-page', 'line-mismatch', 'other'] as const;
 export type QaKind = (typeof QA_KINDS)[number];
 export interface QaFrame { at: number; label: string; png: Uint8Array }
-export interface QaFlag { at: number; kind: QaKind; note: string }
+/** `text`: for personal data, the exact text seen (so it can be blurred next time). */
+export interface QaFlag { at: number; kind: QaKind; note: string; text?: string }
 
 export const QA_SCHEMA = {
   type: 'object', required: ['flags'],
   properties: { flags: { type: 'array', items: { type: 'object', required: ['frame', 'kind', 'note'], properties: {
-    frame: { type: 'integer' }, kind: { enum: [...QA_KINDS] }, note: { type: 'string', maxLength: 200 },
+    frame: { type: 'integer' }, kind: { enum: [...QA_KINDS] }, note: { type: 'string', maxLength: 200 }, text: { type: 'string', maxLength: 120 },
   } } } },
 };
 
-export const QA_INSTRUCTIONS = `You check frames of a GIF/video of an on-screen guide before it is published: a cursor with a name badge walks through a web app. For each numbered frame, flag only real problems a viewer would notice: an error message or toast ("error"), an empty state or blank page where content is expected ("empty"), a "Looking for …" caption meaning the guide got stuck ("stalled"), personal data such as real email addresses, phone numbers, card or account numbers ("personal-data"), or a page that does not fit the step ("wrong-page"). The cursor, the name badge, highlights and captions are part of the guide, not problems. Reply with JSON only: {"flags":[{"frame":1,"kind":"error","note":"…"}]}, an empty list when all is well.`;
+export const QA_INSTRUCTIONS = `You check frames of a GIF/video of an on-screen guide before it is published: a cursor with a name badge walks through a web app. For each numbered frame, flag only real problems a viewer would notice: an error message or toast ("error"), an empty state or blank page where content is expected ("empty"), a "Looking for …" caption meaning the guide got stuck ("stalled"), personal data left readable, such as people's names, email addresses, phone numbers, home addresses, card or account numbers ("personal-data", with the exact text you read in "text"), a page that does not fit the step ("wrong-page"), or a spoken line that says something the frame does not show ("line-mismatch"). Business, shop and product names are not personal. Blurred areas are blurred on purpose: never flag them. The cursor, the name badge, highlights, captions, the title card and the end card are part of the video, not problems. Reply with JSON only: {"flags":[{"frame":1,"kind":"error","note":"…"}]}, an empty list when all is well.`;
 
 /** Ask the model to look at the frames. The answer is checked: unknown frames or kinds are dropped. */
 export async function runQa(ai: Ai, frames: readonly QaFrame[], context: { title?: string; steps: Array<{ n: number; type: string; say?: string }> }): Promise<QaFlag[]> {
@@ -70,7 +71,8 @@ export async function runQa(ai: Ai, frames: readonly QaFrame[], context: { title
     if (!Number.isInteger(r?.frame) || (r.frame as number) < 1 || (r.frame as number) > frames.length) continue;
     const kind = (QA_KINDS as readonly string[]).includes(r.kind as string) ? (r.kind as QaKind) : 'other';
     const note = typeof r.note === 'string' ? r.note.replace(/\s+/g, ' ').trim().slice(0, 200) : '';
-    out.push({ at: frames[(r.frame as number) - 1].at, kind, note });
+    const text = kind === 'personal-data' && typeof (r as { text?: unknown }).text === 'string' ? String((r as { text: string }).text).replace(/\s+/g, ' ').trim().slice(0, 120) : '';
+    out.push({ at: frames[(r.frame as number) - 1].at, kind, note, ...(text ? { text } : {}) });
   }
   return out.sort((a, b) => a.at - b.at);
 }

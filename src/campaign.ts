@@ -29,6 +29,11 @@ import { FFMPEG_MISSING, findFfmpeg } from './mp4';
 import { render } from './render';
 import type { OutFormat } from './render';
 import { voiceOf } from './voice';
+import { checkVideo } from './check';
+import type { CheckResult } from './check';
+import type { BlurSpec } from './blur';
+import type { RefuseSpec } from './refuse';
+import type { Ai } from 'trace-avatar/assist';
 import type { Voice } from './voice';
 
 export const CAMPAIGN_KINDS = CATALOGUE_KINDS;
@@ -79,6 +84,10 @@ export interface CampaignLook {
 
 export interface CampaignVideo {
   id: string;
+  /** Personal data blurred while filming: exact texts and/or contact details by pattern (STUDIO_V3 §3). */
+  blur?: BlurSpec;
+  /** Actions switched off for filming, refused in the page (STUDIO_V3 §5): { pay: true }. */
+  refuse?: RefuseSpec;
   kind: (typeof CAMPAIGN_KINDS)[number];
   /** A guide id (from app.guides) or a .trace.json path … */
   guide?: string;
@@ -228,6 +237,12 @@ export function checkCampaign(c: LoadedCampaign, o: { files?: boolean } = {}): s
     if (v.mode !== undefined && v.mode !== 'overlay' && v.mode !== 'perform') problems.push(`${at} mode is overlay or perform`);
     if (v.director && v.mode) problems.push(`${at} a director video has no mode`);
     if (!v.alt?.trim()) problems.push(`${at} no alt text (what it shows)`);
+    if (v.blur !== undefined && (typeof v.blur !== 'object' || v.blur === null
+      || (v.blur.texts !== undefined && (!Array.isArray(v.blur.texts) || v.blur.texts.some((t) => typeof t !== 'string')))
+      || (v.blur.patterns !== undefined && typeof v.blur.patterns !== 'boolean' && !(Array.isArray(v.blur.patterns) && v.blur.patterns.every((k) => ['email', 'phone', 'account'].includes(k))))
+      || (v.blur.strength !== undefined && !(typeof v.blur.strength === 'number' && v.blur.strength >= 2 && v.blur.strength <= 24)))) {
+      problems.push(`${at} blur is { texts?: [text…], patterns?: true | ["email", "phone", "account"], strength?: 2–24 }`);
+    }
     const looks = v.looks ?? lookNames.slice(0, 1);
     if (!looks.length || looks.some((l) => !lookNames.includes(l))) problems.push(`${at} looks are some of ${lookNames.join(', ') || '(none defined)'}`);
     if (v.kind === 'docs-gif') { if (v.shapes) problems.push(`${at} a docs-gif has no shapes`); if (v.voice) problems.push(`${at} a GIF has no sound`); }
@@ -341,6 +356,8 @@ export interface Made {
   files: Record<string, string>;
   width?: number; height?: number; seconds?: number;
   narrated: boolean; video: string; look: string; at: string;
+  /** What the check found (STUDIO_V3 §4), when make was given an AI to check with. */
+  check?: CheckResult;
 }
 
 export interface MakeOptions {
@@ -353,6 +370,8 @@ export interface MakeOptions {
   /** The voice (over the campaign's narrator and TRACE_AVATAR_VOICE). '' makes narrated videos without a voice. */
   voice?: string | Voice;
   log?: (m: string) => void;
+  /** Checks each made MP4 with this AI (check.ts): flags and blank frames go into the made manifest. */
+  check?: Ai;
 }
 
 const reachable = async (url: string) => { try { return (await fetch(url)).ok; } catch { return false; } };
@@ -467,6 +486,7 @@ export async function makeCampaign(c: LoadedCampaign, o: MakeOptions = {}): Prom
       try {
         await resetFor(c.app, v.reset ?? {});
         let width: number | undefined; let height: number | undefined; let seconds: number | undefined; let spoke = false;
+        let said: string[] = [];
         if (v.director) {
           const res = await direct({
             id: r.id, script: v.director, url: c.app.url, page: v.page ?? '/', appName: c.app.name ?? '',
@@ -475,6 +495,7 @@ export async function makeCampaign(c: LoadedCampaign, o: MakeOptions = {}): Prom
             look: lookOptions({ title: v.title, endTitle: v.endTitle, polish: r.polish }, look.brand, c.app.name ?? ''),
             ...(r.phone ? { viewport: tall ? TALL : { width: 390, height: 844 } } : wide ? { viewport: WIDE } : {}),
             ...(session ? { session } : c.app.storageState ? { session: c.app.storageState } : {}),
+            ...(v.blur ? { autoBlur: v.blur } : {}), ...(v.refuse ? { refuse: v.refuse } : {}),
             ...(v.session ? { sessionOptions: v.session } : {}),
             ...(v.signedIn === false ? { signedOut: true } : {}),
             ...(c.app.alias ? { alias: c.app.alias } : {}),
@@ -514,7 +535,8 @@ export async function makeCampaign(c: LoadedCampaign, o: MakeOptions = {}): Prom
           if (speak && script) args.push('--voice', 'given', '--script', script);
           for (const x of outs) args.push('--out', `${join(c.out, x.name)}${x.canvas ? `@${x.canvas}` : ''}`);
           const p = parse(args);
-          const res = await render({ ...p.options, ...(speak ? { voice: voice! } : {}) });
+          const res = await render({ ...p.options, ...(speak ? { voice: voice! } : {}), ...(v.blur ? { autoBlur: v.blur } : {}), ...(v.refuse ? { refuse: v.refuse } : {}) });
+          said = ((g.trace.steps ?? []) as Array<{ say?: string }>).map((st) => String(st.say ?? '').trim()).filter(Boolean);
           ({ width, height } = res.outputs[0]);
           seconds = Math.round(res.durationMs / 100) / 10;
           spoke = !!res.narration?.lines.length;
@@ -524,7 +546,15 @@ export async function makeCampaign(c: LoadedCampaign, o: MakeOptions = {}): Prom
         for (const x of outs) files[x.key] = x.name;
         if (existsSync(`${firstBase}.png`)) files.poster = `${outs[0].name.replace(/\.[^.]+$/, '')}.png`;
         if (existsSync(`${firstBase}.vtt`)) files.vtt = `${outs[0].name.replace(/\.[^.]+$/, '')}.vtt`;
-        made[r.id] = { files, width, height, seconds, narrated: spoke, video: v.id, look: r.look, at: new Date().toISOString() };
+        // The check (STUDIO_V3 §4): frames of the first MP4, with what the video says.
+        let check: CheckResult | undefined;
+        const mp4 = outs.find((x) => x.format === 'mp4');
+        if (o.check && mp4 && seconds) {
+          if (v.director) said = saysOf(c, r.id) ?? [];
+          check = await checkVideo({ ai: o.check, file: join(c.out, mp4.name), seconds, ffmpeg: findFfmpeg()!, ...(v.title ? { title: v.title } : {}), lines: said });
+          log(`${r.id}: checked ${check.frames} frame(s): ${check.flags.length || check.blank.length ? [...check.flags.map((f) => `${f.kind} at ${(f.at / 1000).toFixed(1)} s (${f.note})`), ...check.blank.map((t) => `blank at ${t} s`)].join('; ') : 'nothing found'}`);
+        }
+        made[r.id] = { files, width, height, seconds, narrated: spoke, video: v.id, look: r.look, at: new Date().toISOString(), ...(check ? { check } : {}) };
         writeFileSync(manifest, `${JSON.stringify(made, null, 2)}\n`);
         log(`${r.id}: ✓ ${Object.values(files).join(', ')}`);
         progress.done(r.id);

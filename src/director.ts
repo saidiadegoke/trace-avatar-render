@@ -18,6 +18,10 @@
  * - A scene is one caption and, narrated, one spoken line (line n of the script is scene n; cards count as scenes).
  *   Narrated, the caption is the spoken line; a card's line is on screen, so it has no caption.
  */
+import { isPayment, refuseScript } from './refuse';
+import type { RefuseSpec } from './refuse';
+import { blurScript } from './blur';
+import type { BlurSpec } from './blur';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, extname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -341,6 +345,10 @@ export interface DirectOptions {
   scale?: number;
   /** Signed in with this session (default: not signed in). */
   session?: Session;
+  /** Personal data blurred in the page as it shows (blur.ts). */
+  autoBlur?: BlurSpec;
+  /** Actions switched off, refused in the page and on the network (refuse.ts). */
+  refuse?: RefuseSpec;
   /** Options for a session function, for the first window (a window of its own can pass others). */
   sessionOptions?: Record<string, unknown>;
   /** Where to save a screenshot of the page when the script fails (to see what it was looking at). */
@@ -484,6 +492,7 @@ export async function direct(o: DirectOptions): Promise<DirectResult> {
   const cards: DirectorCard[] = [];
   let playAt = 0;
   let skipped = false;
+  const refused: string[] = [];
   try {
     const windowOf = async (opts: Record<string, unknown>) => {
       const signedIn = opts.signedIn !== false;
@@ -492,7 +501,20 @@ export async function direct(o: DirectOptions): Promise<DirectResult> {
         viewport: VP, deviceScaleFactor: DSF, permissions: ['clipboard-read', 'clipboard-write'],
         ...(state ? { storageState: state as never } : {}),
       });
+      const blurring = blurScript(o.autoBlur);
+      if (blurring) await context.addInitScript({ content: blurring });
       await routeAlias(context, alias);
+      const refusing = refuseScript(o.refuse);
+      if (refusing) {
+        await context.addInitScript({ content: refusing });
+        // Registered last, so it is asked first: a payment never reaches the alias or a reroute.
+        await context.route('**/*', (route) => {
+          const r = route.request();
+          if (!isPayment(r.method(), r.url())) return route.fallback();
+          refused.push(`${r.method()} ${new URL(r.url()).pathname}`);
+          return route.abort('blockedbyclient');
+        });
+      }
       if (o.reroute) await routeReroute(context, o.reroute);
       if (o.routes) await routeFolders(context, url, o.routes);
       const page = await context.newPage();
@@ -665,6 +687,7 @@ export async function direct(o: DirectOptions): Promise<DirectResult> {
     f.narration = { lines };
     narrated = lines.size > 0;
   }
+  if (refused.length) throw new Error(`${id}: it needs paying, which is switched off for filming: refused ${refused[0]}`);
   for (const x of o.out) mkdirSync(dirname(x.file), { recursive: true });
   // The poster sits beside the first output, as the VTT does.
   if (f.poster === true) f.poster = o.out[0].file.replace(/\.[^./]+$/, '.png');

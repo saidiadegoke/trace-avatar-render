@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.2.5
+
+- **Auto-blur:** personal data is blurred in the page before frames are taken, for guide and director videos alike.
+  `autoBlur: { texts?, patterns? }` in `capture()`, `render()` and `direct()`, `blur` on a campaign video, and
+  `--blur-text` / `--blur-patterns` on the CLI. `patterns` blurs e-mails, phone numbers and account-like numbers
+  (order numbers, dates and prices don't match); `texts` blurs any element whose text holds one. The page is
+  watched, so rows that load later are blurred as they appear. `blurScript`, `patternsIn` and `BLUR_PATTERNS` are
+  exported. Blurring is tunable: `patterns: ['email', 'phone', 'account']` picks the kinds, and `strength` (2–24 px,
+  default 8) sets how strongly (`--blur-kinds`, `--blur-strength`). `blurKinds` and `blurStrength` are exported.
+- **The check:** `checkVideo()` takes frames from a made MP4, flags blank ones in code, and asks an AI about the
+  rest with the video's lines beside them. `makeCampaign(c, { check: ai })` runs it per render and writes `check`
+  into the made manifest.
+- **Refusing switched-off actions:** `refuse: { pay: true }` (capture, render, direct, a campaign video) stops
+  paying while filming. Card fields take no input, a form holding one is never sent, and writes to payment
+  addresses (`/checkout`, `/payments/…`, `/payouts/…`; not `/paylinks`) are aborted, which fails the render with
+  the reason. `isPayment()` is exported.
+- The frame check (`--qa`, `runQa`) gains `line-mismatch`, and returns the exact `text` it read for `personal-data`.
+  Business and product names aren't personal, and blurred areas are never flagged.
+
 ## 0.2.4
 
 - `reroute` (in `direct()` and a campaign's `app`): addresses answered by others while filming, with the address bar unchanged, e.g. `{ "https://api.example.com": "https://demo-api.example.com" }` films a live front end against a demo API. Pages and API calls alike; redirects are followed inside (a redirect handed to the browser would reach the real address). Only what the browser fetches is rerouted. `rerouted(url, map)` is exported.

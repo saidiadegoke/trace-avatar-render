@@ -5,6 +5,7 @@
  * Exit codes: 0 rendered, 1 the render failed (a stalled guide, an error in the app), 2 wrong usage.
  */
 
+import type { BlurKind } from './blur';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { apply as applySuggestions, suggest } from 'trace-avatar/assist';
 import type { Suggestion } from 'trace-avatar/assist';
@@ -34,6 +35,10 @@ export const USAGE = `Usage: trace-avatar-render <trace.json> --url <page> --out
   --max-wait <ms>         waits longer than this are cut to it (default 800, 0 keeps them)
   --hide <selector>       hidden before capture; repeatable
   --blur <selector>       blurred before capture (as well as [data-trace-blur]); repeatable
+  --blur-text <text>      blur any element whose text holds this (a name, an address); repeatable
+  --blur-patterns         blur e-mails, phone numbers and account-like numbers wherever they show
+  --blur-kinds <list>     only these patterns: email,phone,account
+  --blur-strength <px>    how strongly: 2 (light) to 24 (strong); default 8
   --allow-stall           render a stalled guide anyway instead of failing
   --navigate              a step on another page: load that page, as the app's router would (without it, a
                           Show me guide that crosses pages waits on "Open … to continue")
@@ -132,6 +137,7 @@ export function parse(argv: string[]): Parsed {
       'allow-perform': { type: 'boolean' }, width: { type: 'string' }, fps: { type: 'string' },
       viewport: { type: 'string' }, scale: { type: 'string' }, 'storage-state': { type: 'string' },
       'max-wait': { type: 'string' }, hide: { type: 'string', multiple: true }, blur: { type: 'string', multiple: true },
+      'blur-text': { type: 'string', multiple: true }, 'blur-patterns': { type: 'boolean' }, 'blur-kinds': { type: 'string' }, 'blur-strength': { type: 'string' },
       'allow-stall': { type: 'boolean' }, navigate: { type: 'boolean' }, security: { type: 'string' }, value: { type: 'string', multiple: true }, player: { type: 'string' }, timeline: { type: 'string' },
       timeout: { type: 'string' }, headed: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
       frame: { type: 'string' }, background: { type: 'string' }, camera: { type: 'boolean' }, zoom: { type: 'string' },
@@ -221,6 +227,11 @@ export function parse(argv: string[]): Parsed {
       ...(maxWait !== undefined ? { cuts: { maxWaitMs: maxWait } } : {}),
       ...(values.hide ? { hide: values.hide } : {}),
       ...(values.blur ? { blur: values.blur } : {}),
+      ...(values['blur-text'] || values['blur-patterns'] || values['blur-kinds'] ? { autoBlur: {
+        ...(values['blur-text'] ? { texts: values['blur-text'] as string[] } : {}),
+        ...(values['blur-kinds'] ? { patterns: String(values['blur-kinds']).split(',').map((k) => k.trim()) as BlurKind[] } : values['blur-patterns'] ? { patterns: true } : {}),
+        ...(values['blur-strength'] ? { strength: Number(values['blur-strength']) } : {}),
+      } } : {}),
       allowStall: !!values['allow-stall'],
       ...(values.navigate ? { navigate: true } : {}),
       ...(security !== undefined ? { security } : {}),
