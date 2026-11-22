@@ -45,7 +45,7 @@ export { loadCampaign, checkCampaign, readCampaign, rendersOf, filesOf, shapeTag
 export type { Campaign, CampaignApp, CampaignLook, CampaignVideo, CampaignRender, LoadedCampaign, Made, MakeOptions, Progress } from './campaign';
 export { blurScript, blurTexts, patternsIn, BLUR_PATTERNS } from './blur';
 export type { BlurSpec } from './blur';
-export { checkVideo, checkTimes, isBlank } from './check';
-export type { CheckResult } from './check';
+export { checkVideo, checkTimes, cuesOf, frameLabel, isBlank } from './check';
+export type { CheckResult, SaidCue } from './check';
 export { refuseScript, isPayment, PAYMENT_PATH } from './refuse';
 export type { RefuseSpec } from './refuse';

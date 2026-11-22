@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.6
+
+- **A phone guide per video:** a campaign guide video can carry `phone: { guide, voice? }`, a guide written on a
+  phone-sized screen. The 9:16 shape plays it (with its own narration, numbered by its own steps), since a phone
+  layout often hides what the wide one shows, such as a menu collapsed behind a button. `checkCampaign` checks it
+  like the main guide.
+
 ## 0.2.5
 
 - **Auto-blur:** personal data is blurred in the page before frames are taken, for guide and director videos alike.

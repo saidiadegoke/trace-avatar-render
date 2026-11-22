@@ -29,7 +29,7 @@ import { FFMPEG_MISSING, findFfmpeg } from './mp4';
 import { render } from './render';
 import type { OutFormat } from './render';
 import { voiceOf } from './voice';
-import { checkVideo } from './check';
+import { checkVideo, cuesOf } from './check';
 import type { CheckResult } from './check';
 import type { BlurSpec } from './blur';
 import type { RefuseSpec } from './refuse';
@@ -93,6 +93,11 @@ export interface CampaignVideo {
   guide?: string;
   /** … or a director script (.mjs). */
   director?: string;
+  /**
+   * A guide written on a phone-sized screen, for the phone shape (9:16): a phone layout often hides what the wide
+   * one shows (a collapsed menu), so its steps differ. Its own narration per look, numbered by its own steps.
+   */
+  phone?: { guide: string; voice?: Record<string, string> };
   /** Guides: overlay (Show me) or perform (Do it for me: clicks and types for real). */
   mode?: 'overlay' | 'perform';
   /** Perform: values to type, by field name or label. */
@@ -173,6 +178,10 @@ export function loadCampaign(file = 'campaign.json'): LoadedCampaign {
     ...(v.director ? { director: resolve(base, v.director) } : {}),
     ...(v.guide && /\.json$/i.test(v.guide) ? { guide: resolve(base, v.guide) } : {}),
     ...(v.voice ? { voice: Object.fromEntries(Object.entries(v.voice).map(([k, s]) => [k, resolve(base, s)])) } : {}),
+    ...(v.phone ? { phone: {
+      guide: /\.json$/i.test(v.phone.guide) ? resolve(base, v.phone.guide) : v.phone.guide,
+      ...(v.phone.voice ? { voice: Object.fromEntries(Object.entries(v.phone.voice).map(([k, s]) => [k, resolve(base, s)])) } : {}),
+    } } : {}),
   }));
   return { ...c, app, looks, videos, file: f, base, out: resolve(base, c.out ?? join('out', c.product ?? 'product')) };
 }
@@ -224,10 +233,11 @@ export function checkCampaign(c: LoadedCampaign, o: { files?: boolean } = {}): s
     if (!CAMPAIGN_KINDS.includes(v.kind)) problems.push(`${at} kind is one of ${CAMPAIGN_KINDS.join(', ')}`);
     if (!v.guide === !v.director) problems.push(`${at} a guide or a director script (one of them)`);
     if (v.director && !existsSync(v.director)) problems.push(`${at} no director script ${v.director}`);
-    if (v.guide && files) {
-      const g = guideOf(c, v, set);
-      if (!g) problems.push(`${at} no guide ${v.guide}${/\.json$/i.test(v.guide) ? '' : c.app.guides ? ` in ${c.app.guides}` : ' (no app.guides)'}`);
-      else for (const [look, s] of Object.entries(v.voice ?? {})) {
+    if (v.phone && (!v.guide || typeof v.phone.guide !== 'string')) problems.push(`${at} phone is { guide, voice? } on a guide video`);
+    for (const w of v.guide && files ? [v, ...(v.phone?.guide ? [{ ...v, guide: v.phone.guide, voice: v.phone.voice ?? {} }] : [])] : []) {
+      const g = guideOf(c, w, set);
+      if (!g) problems.push(`${at} no guide ${w.guide}${/\.json$/i.test(w.guide!) ? '' : c.app.guides ? ` in ${c.app.guides}` : ' (no app.guides)'}`);
+      else for (const [look, s] of Object.entries(w.voice ?? {})) {
         if (!existsSync(s)) continue;
         const steps = g.trace.steps?.length ?? 0;
         const over = (JSON.parse(readFileSync(s, 'utf8')).lines ?? []).filter((l: { n: number }) => !(l.n >= 1 && l.n <= steps));
@@ -468,7 +478,8 @@ export async function makeCampaign(c: LoadedCampaign, o: MakeOptions = {}): Prom
       log(`${tag} ${r.id} …`);
       progress.start(r.id, i + 1, renders.length);
       stop ??= await ensureApp(c.app, !!o.start, log);
-      const v = r.video;
+      // The phone shape plays its own guide, written on a phone-sized screen, when it has one.
+      const v = r.phone && r.video.phone ? { ...r.video, guide: r.video.phone.guide, voice: r.video.phone.voice ?? r.video.voice } : r.video;
       const outs = filesOf(r);
       const outBase = join(c.out, r.id);
       const firstBase = join(c.out, outs[0].name.replace(/\.[^.]+$/, ''));
@@ -551,7 +562,9 @@ export async function makeCampaign(c: LoadedCampaign, o: MakeOptions = {}): Prom
         const mp4 = outs.find((x) => x.format === 'mp4');
         if (o.check && mp4 && seconds) {
           if (v.director) said = saysOf(c, r.id) ?? [];
-          check = await checkVideo({ ai: o.check, file: join(c.out, mp4.name), seconds, ffmpeg: findFfmpeg()!, ...(v.title ? { title: v.title } : {}), lines: said });
+          const vtt = files.vtt ? join(c.out, files.vtt) : '';
+          const cues = vtt && existsSync(vtt) ? cuesOf(readFileSync(vtt, 'utf8')) : [];
+          check = await checkVideo({ ai: o.check, file: join(c.out, mp4.name), seconds, ffmpeg: findFfmpeg()!, ...(v.title ? { title: v.title } : {}), lines: said, cues });
           log(`${r.id}: checked ${check.frames} frame(s): ${check.flags.length || check.blank.length ? [...check.flags.map((f) => `${f.kind} at ${(f.at / 1000).toFixed(1)} s (${f.note})`), ...check.blank.map((t) => `blank at ${t} s`)].join('; ') : 'nothing found'}`);
         }
         made[r.id] = { files, width, height, seconds, narrated: spoke, video: v.id, look: r.look, at: new Date().toISOString(), ...(check ? { check } : {}) };

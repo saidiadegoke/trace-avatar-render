@@ -29,6 +29,33 @@ export function isBlank(grey: Uint8Array): boolean {
   return Math.sqrt(sq / grey.length) < 2;
 }
 
+export interface SaidCue { start: number; end: number; text: string }
+
+const stamp = (t: string) => { const p = t.trim().split(':').map(Number); return p.reduce((a, v) => a * 60 + v, 0); };
+/** The cues of a WebVTT file: when each line is said, in seconds. */
+export function cuesOf(vtt: string): SaidCue[] {
+  const out: SaidCue[] = [];
+  for (const block of vtt.replace(/\r/g, '').split(/\n{2,}/)) {
+    const lines = block.split('\n');
+    const i = lines.findIndex((l) => l.includes('-->'));
+    if (i < 0) continue;
+    const [a, b] = lines[i].split('-->');
+    const text = lines.slice(i + 1).join(' ').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+    const start = stamp(a); const end = stamp(b.trim().split(/\s/)[0]);
+    if (text && Number.isFinite(start) && Number.isFinite(end)) out.push({ start, end, text });
+  }
+  return out;
+}
+
+/** What a frame at `t` seconds is labelled with: its time, and the line being said then (or the last one said). */
+export function frameLabel(t: number, cues: readonly SaidCue[]): string {
+  const at = `at ${t.toFixed(1)} s`;
+  const now = cues.find((c) => t >= c.start && t < c.end);
+  if (now) return `${at}, while saying: "${now.text}"`;
+  const before = cues.filter((c) => c.end <= t).at(-1);
+  return before ? `${at}, after saying: "${before.text}"` : cues.length ? `${at}, before the first line` : at;
+}
+
 /** The times frames are taken at: evenly through the video, `n` of them. */
 export function checkTimes(seconds: number, n: number): number[] {
   return Array.from({ length: n }, (_, k) => Math.round(seconds * ((k + 0.5) / n) * 100) / 100);
@@ -38,7 +65,7 @@ export function checkTimes(seconds: number, n: number): number[] {
  * Checks a made MP4. `lines` are what it says, in order (shown to the AI as the video's steps). Frames: one per
  * line plus two, between 4 and 12.
  */
-export async function checkVideo(o: { ai: Ai; file: string; seconds: number; ffmpeg: string; title?: string; lines?: string[] }): Promise<CheckResult> {
+export async function checkVideo(o: { ai: Ai; file: string; seconds: number; ffmpeg: string; title?: string; lines?: string[]; cues?: SaidCue[] }): Promise<CheckResult> {
   const lines = o.lines ?? [];
   const n = Math.min(12, Math.max(4, lines.length + 2));
   const frames: Array<{ at: number; label: string; png: Uint8Array }> = [];
@@ -47,7 +74,8 @@ export async function checkVideo(o: { ai: Ai; file: string; seconds: number; ffm
     const f = frameAt(o.ffmpeg, o.file, t);
     if (!f) continue;
     if (isBlank(f.grey)) { blank.push(t); continue; }
-    frames.push({ at: Math.round(t * 1000), label: `at ${t.toFixed(1)} s`, png: f.png });
+    // Each frame says which line is spoken then, so a frame is judged against its own line, not a guessed one.
+    frames.push({ at: Math.round(t * 1000), label: frameLabel(t, o.cues ?? []), png: f.png });
   }
   const flags = frames.length ? await runQa(o.ai, frames, { ...(o.title ? { title: o.title } : {}), steps: lines.map((say, i) => ({ n: i + 1, type: 'line', say })) }) : [];
   return { flags, blank, frames: frames.length + blank.length, at: new Date().toISOString() };

@@ -67,6 +67,19 @@ describe('campaign file', () => {
     expect(checkCampaign(loadCampaign(file))).toContain('intro: the product script has line 5, but the guide has 2 step(s)');
   });
 
+  it('a phone guide (written on a phone-sized screen) is checked with its own narration', () => {
+    const { dir, file } = folder({}, [{ id: 'tour', kind: 'guide', guide: 'wide.trace.json', voice: { product: 'intro.json' }, shapes: ['16:9', '9:16'], alt: 'A tour.',
+      phone: { guide: 'phone.trace.json', voice: { product: 'phone.json' } } }]);
+    writeFileSync(join(dir, 'wide.trace.json'), JSON.stringify({ steps: [{ type: 'click' }, { type: 'note' }] }));
+    writeFileSync(join(dir, 'phone.trace.json'), JSON.stringify({ steps: [{ type: 'click' }, { type: 'click' }, { type: 'note' }] }));
+    writeFileSync(join(dir, 'phone.json'), JSON.stringify({ lines: [{ n: 3, text: 'Three.' }] }));
+    const c = loadCampaign(file);
+    expect(c.videos[0].phone).toEqual({ guide: join(dir, 'phone.trace.json'), voice: { product: join(dir, 'phone.json') } });
+    expect(checkCampaign(c)).toEqual([]);
+    writeFileSync(join(dir, 'phone.json'), JSON.stringify({ lines: [{ n: 4, text: 'Four.' }] }));
+    expect(checkCampaign(loadCampaign(file))).toContain('tour: the product script has line 4, but the guide has 3 step(s)');
+  });
+
   it('TRACE_AVATAR_APP_DIR says where the app is checked out', () => {
     const { dir, file } = folder();
     process.env.TRACE_AVATAR_APP_DIR = join(dir, 'elsewhere');
@@ -235,5 +248,17 @@ describe('reroute: addresses answered by others while filming', async () => {
   });
   it('refuses a map entry with a path', () => {
     expect(() => rerouted('https://api.example.com/x', { 'https://api.example.com/v1': 'https://demo-api.example.com' })).toThrow(/without a path/);
+  });
+});
+
+describe('the check knows what is being said', () => {
+  it('a frame is labelled with the line spoken at its time', async () => {
+    const { cuesOf, frameLabel } = await import('../../src/check');
+    const cues = cuesOf('WEBVTT\n\n1\n00:00:01.000 --> 00:00:03.500\nHome shows your checklist.\n\n2\n00:00:04.000 --> 00:00:06.000\n<v Guide>Products is where you add things.</v>\n');
+    expect(cues).toEqual([{ start: 1, end: 3.5, text: 'Home shows your checklist.' }, { start: 4, end: 6, text: 'Products is where you add things.' }]);
+    expect(frameLabel(0.5, cues)).toBe('at 0.5 s, before the first line');
+    expect(frameLabel(2, cues)).toBe('at 2.0 s, while saying: "Home shows your checklist."');
+    expect(frameLabel(3.8, cues)).toBe('at 3.8 s, after saying: "Home shows your checklist."');
+    expect(frameLabel(5.3, [])).toBe('at 5.3 s');
   });
 });
