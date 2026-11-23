@@ -172,6 +172,8 @@ export async function capture(o: CaptureOptions): Promise<Capture> {
     const context = await browser.newContext({
       viewport: { width: o.viewport.w, height: o.viewport.h },
       deviceScaleFactor: o.scale ?? 1,
+      // A "Copy link" button filmed without it shows the app's "Couldn't copy" message on camera (found 2026-11-23).
+      permissions: ['clipboard-read', 'clipboard-write'],
       ...(o.storageState ? { storageState: o.storageState } : {}),
     });
     const events: TimelineEvent[] = [];

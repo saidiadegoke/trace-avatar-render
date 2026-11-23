@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.7
+
+- **Clipboard in guide videos:** a guide video's browser may read and write the clipboard, as a director's already
+  could, so a filmed "Copy link" copies instead of showing the app's "Couldn't copy" message.
+
 ## 0.2.6
 
 - **A phone guide per video:** a campaign guide video can carry `phone: { guide, voice? }`, a guide written on a
