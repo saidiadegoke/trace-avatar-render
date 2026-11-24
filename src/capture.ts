@@ -103,13 +103,19 @@ function bootstrap(cfg: BootConfig) {
     style.textContent = (cfg.hide.length ? `${cfg.hide.join(',')}{visibility:hidden!important}\n` : '')
       + `${['[data-trace-blur]', ...cfg.blur].join(',')}{filter:blur(8px)!important}`;
     (document.head || document.documentElement).append(style);
-    c = w.__taPlayer.createTrace({
-      trace: cfg.trace, mode: cfg.mode, autoplay: false, controls: false, resumeKey: cfg.key, ...(cfg.rate ? { rate: cfg.rate } : {}), ...(cfg.captions ? { captions: cfg.captions } : {}),
-      // A step on another page: go there, as an app's router would (the player carries on after the load).
-      ...(cfg.navigate ? { navigate: (path: string) => { location.assign(path); } } : {}),
-      ...(cfg.security !== undefined ? { security: cfg.security } : {}),
-      ...(cfg.values ? { values: cfg.values } : {}),
-    });
+    try {
+      c = w.__taPlayer.createTrace({
+        trace: cfg.trace, mode: cfg.mode, autoplay: false, controls: false, resumeKey: cfg.key, ...(cfg.rate ? { rate: cfg.rate } : {}), ...(cfg.captions ? { captions: cfg.captions } : {}),
+        // A step on another page: go there, as an app's router would (the player carries on after the load).
+        ...(cfg.navigate ? { navigate: (path: string) => { location.assign(path); } } : {}),
+        ...(cfg.security !== undefined ? { security: cfg.security } : {}),
+        ...(cfg.values ? { values: cfg.values } : {}),
+      });
+    } catch (e: any) {
+      // A guide the player refuses (its format) throws here: said now, not after the whole timeout (found 2026-11-24).
+      send({ type: 'error', message: String(e?.message ?? e) });
+      return;
+    }
     w.__taRender = c;
     c.on('state', ({ phase }: { phase: string }) => {
       send({ type: 'state', phase });

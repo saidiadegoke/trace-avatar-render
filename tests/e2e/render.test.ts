@@ -13,6 +13,7 @@ import omggif from 'omggif';
 import { PNG } from 'pngjs';
 import { RenderError, findFfmpeg, outputAt, render } from '../../src/index';
 import { main } from '../../src/cli';
+import { capture, findPlayer } from '../../src/capture';
 
 const FIX = join(import.meta.dirname, 'fixtures');
 /** ffprobe reads the MP4s back (ffmpeg-static has no ffprobe: those checks need a full ffmpeg install). */
@@ -119,6 +120,15 @@ describe('render (Chromium)', () => {
     expect(err.screenshot?.length).toBeGreaterThan(1000);
     const ok = await render({ trace: join(FIX, 'stall.trace.json'), url: `${base}/app.html`, out: [join(out, 's2.gif')], allowStall: true });
     expect(ok.outputs[0].bytes).toBeGreaterThan(0);
+  });
+
+  it('a guide the player refuses fails at once, saying why (it used to wait out the whole timeout)', async () => {
+    const trace = { version: 1, meta: { title: 'x' }, steps: [{ type: 'scroll', target: { sel: 'button' }, page: '/app.html' }] };
+    const t0 = Date.now();
+    const err = await capture({ trace: trace as never, url: `${base}/app.html`, mode: 'perform', viewport: { w: 800, h: 600 }, playerFile: await findPlayer(), timeoutMs: 60_000 }).catch((e) => e);
+    expect(err).toBeInstanceOf(RenderError);
+    expect(err.message).toContain('a scroll step needs to or by');
+    expect(Date.now() - t0).toBeLessThan(30_000);
   });
 
   it('the CLI renders (exit 0) and fails a stall (exit 1, screenshot beside the output)', async () => {

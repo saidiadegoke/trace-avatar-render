@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.8
+
+- **A guide the player refuses fails at once:** a trace the player's format refuses used to throw unseen in the page,
+  so a capture waited out its whole timeout for a player that never started. It now fails straight away with the
+  player's reason.
+
 ## 0.2.7
 
 - **Clipboard in guide videos:** a guide video's browser may read and write the clipboard, as a director's already
