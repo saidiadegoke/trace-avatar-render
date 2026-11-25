@@ -55,6 +55,22 @@ export function watermarkOf(v: string | Watermark): Watermark {
 }
 
 /** What a brand file may set: the polish options, nothing about what is played. */
+/** The camera: how far it zooms (default 1.6), and a zoom of its own per output shape (1 keeps that shape still). */
+export interface CameraSpec { zoom?: number; shapes?: Record<string, number> }
+
+/** How far the camera zooms on an output of this shape: the shape's own zoom, else the camera's (default 1.6);
+ *  null with no camera, or when that zoom is 1 (the shape stays still). PURE. */
+export function zoomFor(camera: boolean | CameraSpec | undefined, shape?: Canvas): number | null {
+  if (!camera) return null;
+  const c: CameraSpec = typeof camera === 'object' ? camera : {};
+  let z = c.zoom ?? 1.6;
+  for (const [k, v] of Object.entries(c.shapes ?? {})) {
+    const s = canvasOf(k as CanvasSpec);
+    if (shape && s.width * shape.height === s.height * shape.width) { z = v; break; }
+  }
+  return z > 1 ? z : null;
+}
+
 export interface Brand {
   canvas?: CanvasSpec;
   /** Shapes that fill the picture (no window, no margins), e.g. ["16:9"]; the others keep `frame`. */
@@ -62,7 +78,7 @@ export interface Brand {
   watermark?: string | Watermark;
   frame?: 'none' | 'browser';
   background?: string;
-  camera?: boolean | { zoom?: number };
+  camera?: boolean | CameraSpec;
   captions?: 'burn' | 'vtt' | 'both';
   captionsAt?: 'top' | 'bottom';
   titleCard?: boolean | string | CardOptions;
@@ -101,9 +117,12 @@ export function brandOf(json: unknown, dir = '.'): Brand {
   if (b.frame !== undefined) { if (b.frame === 'none' || b.frame === 'browser') out.frame = b.frame; else problems.push('frame is none or browser'); }
   if (b.background !== undefined) { if (typeof b.background === 'string') out.background = b.background; else problems.push('background is a CSS colour or gradient'); }
   if (b.camera !== undefined) {
-    const z = (b.camera as { zoom?: unknown })?.zoom;
-    if (typeof b.camera === 'boolean' || (typeof b.camera === 'object' && b.camera && (z === undefined || (typeof z === 'number' && z >= 1)))) out.camera = b.camera as Brand['camera'];
-    else problems.push('camera is true, false or { zoom ≥ 1 }');
+    const c = b.camera as { zoom?: unknown; shapes?: unknown };
+    const okZoom = (z: unknown) => z === undefined || (typeof z === 'number' && z >= 1 && z <= 4);
+    const okShapes = (v: unknown) => v === undefined || (typeof v === 'object' && v !== null && !Array.isArray(v)
+      && Object.entries(v).every(([k, z]) => { try { canvasOf(k as CanvasSpec); } catch { return false; } return typeof z === 'number' && okZoom(z); }));
+    if (typeof b.camera === 'boolean' || (typeof c === 'object' && c && okZoom(c.zoom) && okShapes(c.shapes))) out.camera = b.camera as Brand['camera'];
+    else problems.push('camera is true, false or { zoom: 1–4, shapes: { "1:1": 1.8, … } }');
   }
   if (b.captions !== undefined) { if (['burn', 'vtt', 'both'].includes(b.captions as string)) out.captions = b.captions as Brand['captions']; else problems.push('captions is burn, vtt or both'); }
   if (b.captionsAt !== undefined) { if (b.captionsAt === 'top' || b.captionsAt === 'bottom') out.captionsAt = b.captionsAt; else problems.push('captionsAt is top or bottom'); }

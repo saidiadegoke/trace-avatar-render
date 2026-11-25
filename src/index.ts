@@ -6,8 +6,8 @@
  */
 
 export { render, finish, formatOf, cardOf, badgeAt } from './render';
-export { brandOf, brandFile, canvasOf, watermarkOf, CANVASES, CORNERS } from './brand';
-export type { Brand, Canvas, CanvasSpec, Corner, Watermark } from './brand';
+export { brandOf, brandFile, canvasOf, watermarkOf, zoomFor, CANVASES, CORNERS } from './brand';
+export type { Brand, CameraSpec, Canvas, CanvasSpec, Corner, Watermark } from './brand';
 export type { FinishOptions, OutFormat, OutSpec, RenderOptions, RenderOutput, RenderResult } from './render';
 export { capture, findPlayer, RenderError } from './capture';
 export type { Capture, CaptureOptions, CapturedFrame } from './capture';

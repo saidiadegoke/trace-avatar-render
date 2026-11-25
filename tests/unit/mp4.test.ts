@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { encodeMp4 } from '../../src/mp4';
+import { encodeMp4, mp4Args } from '../../src/mp4';
 
 /** A stand-in ffmpeg that reads its input slowly (so writes back up) and exits with `code`. */
 function fakeFfmpeg(code = 0): string {
@@ -31,5 +31,21 @@ describe('encodeMp4', () => {
   it('a failing ffmpeg is reported', async () => {
     const frame = new Uint8Array(64 * 64 * 4);
     await expect(encodeMp4([frame, frame], { file: join(tmpdir(), 'y.mp4'), fps: 30, width: 64, height: 64, ffmpeg: fakeFfmpeg(3) })).rejects.toThrow(/ffmpeg exited with 3/);
+  });
+});
+
+describe('mp4Args: the sound', () => {
+  it('levels narration to −16 LUFS and pads it, so the video decides the length', () => {
+    const a = mp4Args('o.mp4', 30, { width: 100, height: 60 }, 'n.wav');
+    expect(a[a.indexOf('-af') + 1]).toBe('loudnorm=I=-16:TP=-1.5:LRA=11,apad');
+    expect(a).toContain('-shortest');
+    expect(a[a.indexOf('-ar') + 1]).toBe('48000');
+  });
+  it('loudness null leaves the level alone (still padded); no audio, no audio flags', () => {
+    const a = mp4Args('o.mp4', 30, { width: 100, height: 60 }, 'n.wav', { loudness: null });
+    expect(a[a.indexOf('-af') + 1]).toBe('apad');
+    const v = mp4Args('o.mp4', 30, { width: 100, height: 60 });
+    expect(v).not.toContain('-af');
+    expect(v).not.toContain('-shortest');
   });
 });

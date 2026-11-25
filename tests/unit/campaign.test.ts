@@ -91,7 +91,7 @@ describe('campaign file', () => {
     const rs = rendersOf(c);
     expect(rs.map((r) => r.id)).toEqual(['intro--product', 'intro--product--phone', 'intro--showcase', 'intro--showcase--phone', 'ad-paid--product', 'ad-paid--product--phone', 'gif-send--product']);
     expect(rs[0]).toMatchObject({ shapes: ['16:9', '1:1'], phone: false, format: 'mp4', polish: ['--scale', '2', '--captions', 'vtt', '--poster'] });
-    expect(rs[1]).toMatchObject({ shapes: ['9:16'], phone: true, polish: ['--scale', '2', '--frame', 'none', '--captions', 'vtt', '--poster'] });
+    expect(rs[1]).toMatchObject({ shapes: ['9:16'], phone: true, polish: ['--scale', '3', '--frame', 'none', '--captions', 'vtt', '--poster'] });
     expect(rs[4].polish.at(-1)).toBe('--title-card');
     expect(filesOf(rs[0])).toEqual([
       { key: 'mp4@16:9', name: 'intro--product-16x9.mp4', format: 'mp4', canvas: '16:9' },

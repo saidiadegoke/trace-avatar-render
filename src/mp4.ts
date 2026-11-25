@@ -35,11 +35,23 @@ export function findFfmpeg(env: NodeJS.ProcessEnv = process.env, o: { bundled?: 
 /** What to say when there is no ffmpeg. */
 export const FFMPEG_MISSING = 'MP4 needs ffmpeg: install ffmpeg-static (npm install ffmpeg-static), install ffmpeg (brew install ffmpeg, apt install ffmpeg), or set FFMPEG to its path. GIF works without it.';
 
-export function mp4Args(file: string, fps: number, size: { width: number; height: number }, audio?: string): string[] {
+/** Narration is levelled to this loudness (LUFS), with true peaks under −1.5 dBTP: the level speech is published at. */
+export const LOUDNESS = -16;
+
+/**
+ * The sound: levelled to `loudness` LUFS (null leaves it as it is), then padded with silence, so the video, not the
+ * sound, decides where the file ends and a last line is never cut short.
+ */
+function audioArgs(audio: string, loudness: number | null): string[] {
+  const level = loudness === null ? [] : [`loudnorm=I=${loudness}:TP=-1.5:LRA=11`];
+  return ['-i', audio, '-map', '0:v', '-map', '1:a', '-af', [...level, 'apad'].join(','), '-ar', '48000', '-c:a', 'aac', '-b:a', '128k'];
+}
+
+export function mp4Args(file: string, fps: number, size: { width: number; height: number }, audio?: string, o: { loudness?: number | null } = {}): string[] {
   return [
     '-y', '-loglevel', 'error',
     '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${size.width}x${size.height}`, '-framerate', String(fps), '-i', '-',
-    ...(audio ? ['-i', audio, '-map', '0:v', '-map', '1:a', '-c:a', 'aac', '-b:a', '128k'] : []),
+    ...(audio ? audioArgs(audio, o.loudness === undefined ? LOUDNESS : o.loudness) : []),
     '-vf', 'format=yuv420p',
     '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-r', String(fps),
     ...(audio ? ['-shortest'] : []),
@@ -49,11 +61,11 @@ export function mp4Args(file: string, fps: number, size: { width: number; height
 }
 
 /** Write RGBA frames (one per output frame, even width and height) to an MP4. */
-export async function encodeMp4(frames: Iterable<Uint8Array>, o: { file: string; fps: number; width: number; height: number; ffmpeg?: string; audio?: string }): Promise<void> {
+export async function encodeMp4(frames: Iterable<Uint8Array>, o: { file: string; fps: number; width: number; height: number; ffmpeg?: string; audio?: string; loudness?: number | null }): Promise<void> {
   const bin = o.ffmpeg ?? findFfmpeg();
   if (!bin) throw new Error(FFMPEG_MISSING);
   if (o.width % 2 || o.height % 2) throw new Error(`MP4 needs an even size (got ${o.width}×${o.height})`);
-  const p = spawn(bin, mp4Args(o.file, o.fps, o, o.audio), { stdio: ['pipe', 'ignore', 'pipe'] });
+  const p = spawn(bin, mp4Args(o.file, o.fps, o, o.audio, { loudness: o.loudness }), { stdio: ['pipe', 'ignore', 'pipe'] });
   let err = '';
   p.stderr.on('data', (d) => { err += String(d); });
   const done = new Promise<void>((resolve, reject) => {

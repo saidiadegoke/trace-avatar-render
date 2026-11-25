@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.9
+
+- **A zoom per shape:** `camera` (and a brand's `camera`) takes `{ zoom, shapes: { "1:1": 1.8, "9:16": 1.2 } }`: each
+  output shape zooms by its own amount, from the one capture (1 keeps a shape still). `zoomFor()` is exported.
+- **Long trips zoom out:** a move to an action farther than 45% of the page's width (`travel`) zooms out and back in
+  instead of panning across the screen, and zooms out early enough for the next shot to arrive before its action.
+- **Levelled sound:** narration is levelled to −16 LUFS (true peaks under −1.5 dBTP) and padded with silence, so the
+  video decides where the file ends and a last line is never cut. Audio is 48 kHz.
+- **Sharper phone videos:** a campaign's 9:16 renders capture at ×3 (1242×2208 for a 414×736 phone), scaled down to
+  1080×1920 instead of up from ×2.
+
 ## 0.2.8
 
 - **A guide the player refuses fails at once:** a trace the player's format refuses used to throw unseen in the page,

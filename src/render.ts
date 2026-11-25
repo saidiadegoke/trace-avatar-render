@@ -14,6 +14,7 @@ import { chromium } from 'playwright';
 import { PNG } from 'pngjs';
 import { cameraPath } from './camera';
 import type { Rect } from './camera';
+import type { CameraSpec } from './brand';
 import { capture, findPlayer, RenderError } from './capture';
 import type { Capture } from './capture';
 import { blank, copy, crossfade, drawRegion, overlay } from './compose';
@@ -22,7 +23,7 @@ import type { Image } from './image';
 import { createLayers, DEFAULT_BACKGROUND } from './layers';
 import type { CardOptions, Layers } from './layers';
 import { layoutOf } from './layout';
-import { canvasOf, watermarkOf } from './brand';
+import { canvasOf, watermarkOf, zoomFor } from './brand';
 import type { CanvasSpec, Corner, Watermark } from './brand';
 import type { FrameStyle, Layout } from './layout';
 import { encodeMp4, FFMPEG_MISSING, findFfmpeg } from './mp4';
@@ -102,8 +103,9 @@ export interface RenderOptions {
   frame?: FrameStyle;
   /** CSS background behind the window and on the cards. Default a soft gradient. */
   background?: string;
-  /** Zoom in on each action and pan between close ones. true, or { zoom } (default 1.6). Default off. */
-  camera?: boolean | { zoom?: number };
+  /** Zoom in on each action and pan between close ones. true, or { zoom } (default 1.6), with a zoom of its own per
+   *  output shape: { zoom: 1.4, shapes: { '1:1': 1.8, '9:16': 1.2 } } (1 keeps that shape still). Default off. */
+  camera?: boolean | CameraSpec;
   /** 'burn' draws the steps' words into the video (the player's own bubble is then off), 'vtt' writes
    *  <out>.vtt and <out>.chapters.vtt beside the first output, 'both' does both. Default: neither. */
   captions?: 'burn' | 'vtt' | 'both';
@@ -367,11 +369,22 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
   const mark = o.watermark !== undefined ? watermarkOf(o.watermark) : undefined;
   const background = o.background ?? DEFAULT_BACKGROUND;
   const burn = o.captions === 'burn' || o.captions === 'both';
+  // The camera: one path per zoom, built when an output first asks for it.
+  const camerasOf = (acts: ReturnType<typeof actionsOf>, width: number, height: number) => {
+    const made = new Map<number, (t: number) => Rect>();
+    return (zoom: number | null) => {
+      if (zoom === null || zoom <= 1) return null;
+      if (!made.has(zoom)) made.set(zoom, cameraPath(acts, { width, height, zoom }));
+      return made.get(zoom)!;
+    };
+  };
+  /** How far output n zooms: its shape's own zoom, else the camera's; null with no camera. */
+  const zoomOf = (n: number): number | null => zoomFor(o.camera, canvases[n]);
   const variant = (sg: Segment[]) => {
     const ms = durationOf(sg);
     return {
       segs: sg, contentMs: ms,
-      cam: o.camera ? cameraPath(actionsOf(cap.events, sg, scale), { width: srcW, height: srcH, ...(typeof o.camera === 'object' && o.camera.zoom ? { zoom: o.camera.zoom } : {}) }) : null,
+      cam: camerasOf(actionsOf(cap.events, sg, scale), srcW, srcH),
       // A card says its own words: no caption over it or after it.
       cues: o.captions ? stepCues(cap.events.map((e) => (e.stepType === 'card' ? { ...e, say: undefined } : e)), sg, ms) : [],
     };
@@ -400,7 +413,8 @@ export async function finish(cap: Capture, outs: Array<OutSpec & { format: OutFo
       const layout = layoutOf(srcW, srcH, out.width ?? (out.format === 'gif' ? 800 : undefined), frameStyle, canvases[n], fills[n]);
       // A GIF has no sound, so it keeps the timing without holds.
       const v = out.format === 'gif' ? plain : main;
-      const { cam, segs, contentMs } = v;
+      const { segs, contentMs } = v;
+      const cam = v.cam(zoomOf(n));
       const cues = v.cues;
       const times = frameTimes(segs, fps);
       const picks = pickFrames(stamps, times);

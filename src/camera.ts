@@ -23,6 +23,9 @@ export interface CameraOptions {
   holdMs?: number;
   /** A zoom change at most this often: shots closer than this are joined. Default 1500. */
   minChangeMs?: number;
+  /** A move to an action farther than this share of the page's width zooms out and back in instead of panning
+   *  across the screen. Default 0.45. */
+  travel?: number;
 }
 
 interface Key { t: number; z: number; x: number; y: number }
@@ -40,6 +43,7 @@ export function cameraKeys(actions: readonly Action[], o: CameraOptions): Key[] 
   const join = o.joinMs ?? 2500;
   const hold = o.holdMs ?? 900;
   const minChange = o.minChangeMs ?? 1500;
+  const far = (a: Action, b: Action) => Math.hypot(a.x - b.x, a.y - b.y) > (o.travel ?? 0.45) * o.width;
   const sorted = actions.slice().sort((a, b) => a.t - b.t);
   // Shots: runs of zoomable actions; a scroll ends a shot.
   const shots: Action[][] = [];
@@ -47,7 +51,7 @@ export function cameraKeys(actions: readonly Action[], o: CameraOptions): Key[] 
   for (const a of sorted) {
     if (!ZOOM_KINDS.has(a.kind)) { if (cur.length) shots.push(cur); cur = []; continue; }
     const last = cur[cur.length - 1];
-    if (last && a.t - last.t > join) { shots.push(cur); cur = []; }
+    if (last && (a.t - last.t > join || far(a, last))) { shots.push(cur); cur = []; }
     cur.push(a);
   }
   if (cur.length) shots.push(cur);
@@ -59,12 +63,12 @@ export function cameraKeys(actions: readonly Action[], o: CameraOptions): Key[] 
       const outAt = prev[prev.length - 1].t + hold;
       const inAt = s[0].t - lead - ease;
       const scrollBetween = sorted.some((a) => !ZOOM_KINDS.has(a.kind) && a.t > prev[prev.length - 1].t && a.t < s[0].t);
-      if (!scrollBetween && inAt - (outAt + ease) < minChange) { prev.push(...s); continue; }
+      if (!scrollBetween && !far(prev[prev.length - 1], s[0]) && inAt - (outAt + ease) < minChange) { prev.push(...s); continue; }
     }
     merged.push(s.slice());
   }
   const keys: Key[] = [];
-  for (const s of merged) {
+  for (const [n, s] of merged.entries()) {
     const first = s[0];
     const inEnd = Math.max(first.t - lead, (keys[keys.length - 1]?.t ?? -Infinity) + ease);
     keys.push({ t: inEnd - ease, z: 1, x: first.x, y: first.y }, { t: inEnd, z: Z, x: first.x, y: first.y });
@@ -75,7 +79,11 @@ export function cameraKeys(actions: readonly Action[], o: CameraOptions): Key[] 
       keys.push({ t: arrive - ease, z: Z, x: prev.x, y: prev.y }, { t: arrive, z: Z, x: a.x, y: a.y });
     }
     const last = keys[keys.length - 1];
-    const out = Math.max(s[s.length - 1].t + hold, last.t);
+    // Out in time for the next shot to come in before its action (a long trip can follow closely), never sooner
+    // than 200 ms after this shot's last action.
+    const next = merged[n + 1]?.[0];
+    const room = next ? next.t - lead - 2 * ease - s[s.length - 1].t : Infinity;
+    const out = Math.max(s[s.length - 1].t + Math.max(200, Math.min(hold, room)), last.t);
     keys.push({ t: out, z: Z, x: last.x, y: last.y }, { t: out + ease, z: 1, x: last.x, y: last.y });
   }
   return keys;

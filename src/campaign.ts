@@ -289,7 +289,7 @@ export function rendersOf(c: Campaign): CampaignRender[] {
       const desk = (v.shapes ?? []).filter((s) => DESKTOP.includes(s));
       // Desktop: captions as a file (uploaded beside the video where a platform takes one), never burned in.
       if (desk.length) out.push({ id: `${v.id}--${look}`, video: v, look, phone: false, shapes: desk, format: 'mp4', polish: ['--scale', '2', '--captions', 'vtt', '--poster', ...(v.polish ?? [])] });
-      if (v.shapes?.includes('9:16')) out.push({ id: `${v.id}--${look}--phone`, video: v, look, phone: true, shapes: ['9:16'], format: 'mp4', polish: ['--scale', '2', '--frame', 'none', '--captions', 'vtt', '--poster', ...(v.polish ?? [])] });
+      if (v.shapes?.includes('9:16')) out.push({ id: `${v.id}--${look}--phone`, video: v, look, phone: true, shapes: ['9:16'], format: 'mp4', polish: ['--scale', '3', '--frame', 'none', '--captions', 'vtt', '--poster', ...(v.polish ?? [])] });
     }
   }
   return out;

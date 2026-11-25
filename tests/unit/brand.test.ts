@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import omggif from 'omggif';
 import { PNG } from 'pngjs';
-import { brandFile, brandOf, canvasOf, watermarkOf } from '../../src/brand';
+import { brandFile, brandOf, canvasOf, watermarkOf, zoomFor } from '../../src/brand';
 import { layoutOf } from '../../src/layout';
 import { badgeAt, finish } from '../../src/render';
 import { parse } from '../../src/cli';
@@ -161,4 +161,25 @@ describe('finish with a canvas and a watermark', () => {
     expect(dark(px, g.width, 0, 0, 100, 30)).toBeGreaterThan(50);
     expect(dark(px, g.width, 200, 150, 320, 200)).toBe(0);
   }, 30_000);
+});
+
+describe('the camera per shape', () => {
+  it('a shape has its own zoom; others take the camera\'s; 1 keeps a shape still', () => {
+    const cam = { zoom: 1.4, shapes: { '1:1': 1.8, '9:16': 1 } };
+    expect(zoomFor(cam, canvasOf('16:9'))).toBe(1.4);
+    expect(zoomFor(cam, canvasOf('1:1'))).toBe(1.8);
+    expect(zoomFor(cam, { width: 540, height: 540 })).toBe(1.8); // any square
+    expect(zoomFor(cam, canvasOf('9:16'))).toBeNull();
+    expect(zoomFor(cam, undefined)).toBe(1.4); // no canvas: the camera's
+    expect(zoomFor(true, canvasOf('1:1'))).toBe(1.6);
+    expect(zoomFor(false, canvasOf('1:1'))).toBeNull();
+    expect(zoomFor(undefined)).toBeNull();
+  });
+
+  it('a brand may give zooms per shape; bad ones are refused', () => {
+    expect(brandOf({ camera: { zoom: 1.4, shapes: { '1:1': 1.8 } } }, '/b').camera).toEqual({ zoom: 1.4, shapes: { '1:1': 1.8 } });
+    expect(() => brandOf({ camera: { shapes: { '1:1': 0.5 } } }, '/b')).toThrow(/camera is/);
+    expect(() => brandOf({ camera: { shapes: { round: 2 } } }, '/b')).toThrow(/camera is/);
+    expect(() => brandOf({ camera: { zoom: 9 } }, '/b')).toThrow(/camera is/);
+  });
 });

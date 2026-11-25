@@ -178,7 +178,7 @@ describe('cli: narration', () => {
   });
   it('the ffmpeg arguments with a narration track', () => {
     expect(mp4Args('o.mp4', 30, { width: 640, height: 400 }, 'n.wav')).toEqual(['-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', '640x400', '-framerate', '30', '-i', '-',
-      '-i', 'n.wav', '-map', '0:v', '-map', '1:a', '-c:a', 'aac', '-b:a', '128k',
+      '-i', 'n.wav', '-map', '0:v', '-map', '1:a', '-af', 'loudnorm=I=-16:TP=-1.5:LRA=11,apad', '-ar', '48000', '-c:a', 'aac', '-b:a', '128k',
       '-vf', 'format=yuv420p', '-c:v', 'libx264', '-preset', 'medium', '-crf', '20', '-r', '30', '-shortest', '-movflags', '+faststart', 'o.mp4']);
   });
   it('suggest --task narration writes a script from the steps (nothing typed sent), checked', async () => {
